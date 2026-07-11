@@ -17,6 +17,14 @@
   const modelSubtitle = document.querySelector("[data-model-subtitle]");
   const typingTitle = document.querySelector("[data-typing-title]");
 
+  import("/hcai/planets.js?v=gpt56-planets-1")
+    .then(function (module) {
+      module.initPlanets(document);
+    })
+    .catch(function (error) {
+      console.warn("[hcai] 3D planets unavailable:", error);
+    });
+
   function updateFavicon(logoUrl) {
     if (!logoUrl) {
       return;
@@ -244,6 +252,34 @@
     fitTypingTitle();
     window.setTimeout(tickTypingTitle, 500);
     window.addEventListener("resize", fitTypingTitle);
+  }
+
+  const caseButtons = Array.from(document.querySelectorAll("[data-case-src]"));
+  const caseFrame = document.querySelector("[data-case-frame]");
+  const casePrompt = document.querySelector("[data-case-prompt-output]");
+
+  if (caseButtons.length && caseFrame && casePrompt) {
+    caseButtons.forEach(function (button) {
+      button.addEventListener("click", function () {
+        const source = button.getAttribute("data-case-src");
+        const title = button.getAttribute("data-case-title") || button.textContent.trim();
+        const prompt = button.getAttribute("data-case-prompt") || "";
+
+        caseButtons.forEach(function (currentButton) {
+          const active = currentButton === button;
+          currentButton.classList.toggle("is-active", active);
+          currentButton.setAttribute("aria-selected", String(active));
+        });
+
+        if (source && caseFrame.getAttribute("src") !== source) {
+          caseFrame.setAttribute("src", source);
+        }
+
+        caseFrame.setAttribute("title", title);
+        casePrompt.textContent = prompt;
+        casePrompt.parentElement.hidden = !prompt;
+      });
+    });
   }
 
   faqItems.forEach(function (item) {

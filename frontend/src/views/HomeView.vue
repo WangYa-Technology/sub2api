@@ -18,7 +18,7 @@ function ensureStylesheet() {
 
   stylesheetElement = document.createElement('link')
   stylesheetElement.rel = 'stylesheet'
-  stylesheetElement.href = '/hcai/style.css?v=hero-title-compact'
+  stylesheetElement.href = '/hcai/style.css?v=gpt56-planets'
   stylesheetElement.dataset.hcaiHomeStyle = 'true'
   document.head.appendChild(stylesheetElement)
 }
@@ -39,7 +39,7 @@ function rewriteStaticAssetPaths(container: ParentNode) {
 function runPageScript() {
   scriptElement?.remove()
   scriptElement = document.createElement('script')
-  scriptElement.src = '/hcai/main.js?v=hero-title-compact'
+  scriptElement.src = '/hcai/main.js?v=gpt56-planets'
   scriptElement.dataset.hcaiHomeScript = 'true'
   document.body.appendChild(scriptElement)
 }

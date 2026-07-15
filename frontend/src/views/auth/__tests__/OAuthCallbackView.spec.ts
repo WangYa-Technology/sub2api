@@ -162,7 +162,10 @@ describe('OAuthCallbackView', () => {
       refresh_token: 'refresh-token',
       expires_in: '86400',
       token_type: 'Bearer',
-      redirect: '/auth/oauth/callback?client=ccswitch&request_id=request_12345678',
+      // 后端 `redirectWithFragment` 生成的生产格式会额外编码一次 redirect。
+      redirect: encodeURIComponent(
+        '/auth/oauth/callback?client=ccswitch&request_id=request_12345678'
+      ),
     })
     locationState.current.hash = `#${fragment.toString()}`
 

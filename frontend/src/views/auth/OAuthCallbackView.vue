@@ -268,11 +268,23 @@ function buildCcSwitchCallbackUrl(
   tokenResponse: OAuthTokenResponse,
   redirect: string
 ): string | null {
-  if (!redirect.startsWith('/') || redirect.startsWith('//')) return null
+  // `redirectWithFragment` 会让 fragment 中的 redirect 再经过一次 URL 编码；
+  // URLSearchParams 解析后可能仍是 `%2Fauth%2F...`。只有限解码后再执行完整白名单校验。
+  let normalizedRedirect = redirect
+  for (let i = 0; i < 2 && normalizedRedirect.includes('%'); i += 1) {
+    try {
+      const decoded = decodeURIComponent(normalizedRedirect)
+      if (decoded === normalizedRedirect) break
+      normalizedRedirect = decoded
+    } catch {
+      return null
+    }
+  }
+  if (!normalizedRedirect.startsWith('/') || normalizedRedirect.startsWith('//')) return null
 
   let target: URL
   try {
-    target = new URL(redirect, 'https://hcai.invalid')
+    target = new URL(normalizedRedirect, 'https://hcai.invalid')
   } catch {
     return null
   }

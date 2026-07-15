@@ -155,6 +155,43 @@ describe('OAuthCallbackView', () => {
     expect(exchangePendingOAuthCompletionMock).not.toHaveBeenCalled()
   })
 
+  it('returns HCAI tokens to CC Switch for the explicit desktop callback target', async () => {
+    routeState.path = '/auth/oauth/callback'
+    const fragment = new URLSearchParams({
+      access_token: 'access-token',
+      refresh_token: 'refresh-token',
+      expires_in: '86400',
+      token_type: 'Bearer',
+      redirect: '/auth/oauth/callback?client=ccswitch&request_id=request_12345678',
+    })
+    locationState.current.hash = `#${fragment.toString()}`
+
+    mount(OAuthCallbackView)
+    await vi.dynamicImportSettled()
+
+    expect(locationState.current.href).toBe(
+      'ccswitch://hcai/oauth/callback?request_id=request_12345678#access_token=access-token&refresh_token=refresh-token&expires_in=86400&token_type=Bearer'
+    )
+    expect(setTokenMock).not.toHaveBeenCalled()
+    expect(routerReplaceMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps the normal web login flow for non-desktop redirects', async () => {
+    routeState.path = '/auth/oauth/callback'
+    const fragment = new URLSearchParams({
+      access_token: 'web-token',
+      redirect: '/dashboard',
+    })
+    locationState.current.hash = `#${fragment.toString()}`
+
+    mount(OAuthCallbackView)
+    await vi.dynamicImportSettled()
+
+    expect(setTokenMock).toHaveBeenCalledWith('web-token')
+    expect(routerReplaceMock).toHaveBeenCalledWith('/dashboard')
+    expect(locationState.current.href).toBe('http://localhost/auth/callback')
+  })
+
   it('submits stored affiliate code when completing invited email oauth registration', async () => {
     routeState.path = '/auth/oauth/callback'
     exchangePendingOAuthCompletionMock.mockResolvedValue({

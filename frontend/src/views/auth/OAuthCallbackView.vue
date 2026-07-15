@@ -183,6 +183,8 @@ const pendingProvider = ref<'github' | 'google'>('github')
 const redirectTo = ref('/dashboard')
 const invalidCallback = ref(false)
 const EMAIL_OAUTH_PENDING_PROVIDER_KEY = 'email_oauth_pending_provider'
+const CC_SWITCH_CALLBACK_PATH = '/auth/oauth/callback'
+const CC_SWITCH_CLIENT = 'ccswitch'
 
 type EmailOAuthPendingCompletion = Partial<OAuthTokenResponse> & {
   error?: string
@@ -248,6 +250,45 @@ function sanitizeRedirectPath(path: string | null | undefined): string {
   return path
 }
 
+function buildCcSwitchCallbackUrl(
+  tokenResponse: OAuthTokenResponse,
+  redirect: string
+): string | null {
+  if (!redirect.startsWith('/') || redirect.startsWith('//')) return null
+
+  let target: URL
+  try {
+    target = new URL(redirect, 'https://hcai.invalid')
+  } catch {
+    return null
+  }
+
+  if (
+    target.origin !== 'https://hcai.invalid' ||
+    target.pathname !== CC_SWITCH_CALLBACK_PATH ||
+    target.searchParams.getAll('client').length !== 1 ||
+    target.searchParams.get('client') !== CC_SWITCH_CLIENT
+  ) {
+    return null
+  }
+
+  const requestIds = target.searchParams.getAll('request_id')
+  if (requestIds.length > 1) return null
+  const requestId = requestIds[0]?.trim() || ''
+  if (requestId && !/^[A-Za-z0-9_-]{8,128}$/.test(requestId)) return null
+
+  const fragment = new URLSearchParams()
+  fragment.set('access_token', tokenResponse.access_token)
+  if (tokenResponse.refresh_token) fragment.set('refresh_token', tokenResponse.refresh_token)
+  if (tokenResponse.expires_in) fragment.set('expires_in', String(tokenResponse.expires_in))
+  if (tokenResponse.token_type) fragment.set('token_type', tokenResponse.token_type)
+
+  const query = new URLSearchParams()
+  if (requestId) query.set('request_id', requestId)
+  const queryString = query.toString()
+  return `ccswitch://hcai/oauth/callback${queryString ? `?${queryString}` : ''}#${fragment.toString()}`
+}
+
 function readPendingEmailOAuthProvider(): 'github' | 'google' | null {
   if (typeof window === 'undefined') return null
   const provider = window.sessionStorage.getItem(EMAIL_OAUTH_PENDING_PROVIDER_KEY)
@@ -272,6 +313,15 @@ function redirectProviderCallbackToBackend(provider: 'github' | 'google'): void 
 }
 
 async function finalizeTokenResponse(tokenResponse: OAuthTokenResponse, redirect: string) {
+  const ccSwitchCallbackUrl = buildCcSwitchCallbackUrl(tokenResponse, redirect)
+  if (ccSwitchCallbackUrl && typeof window !== 'undefined') {
+    window.sessionStorage.removeItem(EMAIL_OAUTH_PENDING_PROVIDER_KEY)
+    clearAllAffiliateReferralCodes()
+    appStore.showSuccess(t('auth.loginSuccess'))
+    window.location.href = ccSwitchCallbackUrl
+    return
+  }
+
   persistOAuthTokenContext(tokenResponse)
   await authStore.setToken(tokenResponse.access_token)
   if (typeof window !== 'undefined') {

@@ -166,14 +166,23 @@ describe('OAuthCallbackView', () => {
     })
     locationState.current.hash = `#${fragment.toString()}`
 
-    mount(OAuthCallbackView)
+    const wrapper = mount(OAuthCallbackView)
     await vi.dynamicImportSettled()
 
     expect(locationState.current.href).toBe(
       'ccswitch://hcai/oauth/callback?request_id=request_12345678#access_token=access-token&refresh_token=refresh-token&expires_in=86400&token_type=Bearer'
     )
+    expect(wrapper.text()).toContain('auth.oauth.desktopCallbackTitle')
+    expect(wrapper.text()).toContain('auth.oauth.openDesktopApp')
+    expect(wrapper.html()).not.toContain('access-token')
     expect(setTokenMock).not.toHaveBeenCalled()
     expect(routerReplaceMock).not.toHaveBeenCalled()
+
+    locationState.current.href = 'https://ai.hctopup.com/auth/oauth/callback'
+    await wrapper.get('button').trigger('click')
+    expect(locationState.current.href).toBe(
+      'ccswitch://hcai/oauth/callback?request_id=request_12345678#access_token=access-token&refresh_token=refresh-token&expires_in=86400&token_type=Bearer'
+    )
   })
 
   it('keeps the normal web login flow for non-desktop redirects', async () => {

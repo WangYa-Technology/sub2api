@@ -378,6 +378,9 @@ export default {
       callbackHint: 'Copy the code and state back to the admin authorization flow when needed.',
       invalidCallbackTitle: 'Invalid sign-in callback',
       invalidCallbackHint: 'This page does not contain a valid authorization result. Return to the login page and start quick sign-in again.',
+      desktopCallbackTitle: 'Authorization complete',
+      desktopCallbackHint: 'If HCAI Switch did not open automatically, use the button below to return to the app.',
+      openDesktopApp: 'Open HCAI Switch',
       code: 'Code',
       state: 'State',
       fullUrl: 'Full URL'

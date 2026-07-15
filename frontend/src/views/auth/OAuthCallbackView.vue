@@ -1,7 +1,19 @@
 <template>
   <div class="min-h-screen bg-gray-50 px-4 py-10 dark:bg-dark-900">
     <div class="mx-auto max-w-2xl">
-      <div v-if="isProcessing" class="card p-6 text-center">
+      <div v-if="ccSwitchCallbackUrl" class="card p-6 text-center">
+        <h1 class="text-lg font-semibold text-gray-900 dark:text-white">
+          {{ t('auth.oauth.desktopCallbackTitle') }}
+        </h1>
+        <p class="mt-2 text-sm text-gray-600 dark:text-gray-400">
+          {{ t('auth.oauth.desktopCallbackHint') }}
+        </p>
+        <button class="btn btn-primary mt-6" type="button" @click="openCcSwitch">
+          {{ t('auth.oauth.openDesktopApp') }}
+        </button>
+      </div>
+
+      <div v-else-if="isProcessing" class="card p-6 text-center">
         <div class="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-primary-500 border-t-transparent"></div>
         <h1 class="mt-4 text-lg font-semibold text-gray-900 dark:text-white">
           {{ t('auth.oauth.callbackTitle') }}
@@ -182,6 +194,8 @@ const registrationError = ref('')
 const pendingProvider = ref<'github' | 'google'>('github')
 const redirectTo = ref('/dashboard')
 const invalidCallback = ref(false)
+// 仅保存在页面运行时内存中；不要将包含 token 的 URL 渲染到 DOM。
+const ccSwitchCallbackUrl = ref('')
 const EMAIL_OAUTH_PENDING_PROVIDER_KEY = 'email_oauth_pending_provider'
 const CC_SWITCH_CALLBACK_PATH = '/auth/oauth/callback'
 const CC_SWITCH_CLIENT = 'ccswitch'
@@ -289,6 +303,11 @@ function buildCcSwitchCallbackUrl(
   return `ccswitch://hcai/oauth/callback${queryString ? `?${queryString}` : ''}#${fragment.toString()}`
 }
 
+function openCcSwitch(): void {
+  if (!ccSwitchCallbackUrl.value || typeof window === 'undefined') return
+  window.location.href = ccSwitchCallbackUrl.value
+}
+
 function readPendingEmailOAuthProvider(): 'github' | 'google' | null {
   if (typeof window === 'undefined') return null
   const provider = window.sessionStorage.getItem(EMAIL_OAUTH_PENDING_PROVIDER_KEY)
@@ -313,12 +332,15 @@ function redirectProviderCallbackToBackend(provider: 'github' | 'google'): void 
 }
 
 async function finalizeTokenResponse(tokenResponse: OAuthTokenResponse, redirect: string) {
-  const ccSwitchCallbackUrl = buildCcSwitchCallbackUrl(tokenResponse, redirect)
-  if (ccSwitchCallbackUrl && typeof window !== 'undefined') {
+  const desktopCallbackUrl = buildCcSwitchCallbackUrl(tokenResponse, redirect)
+  if (desktopCallbackUrl && typeof window !== 'undefined') {
     window.sessionStorage.removeItem(EMAIL_OAUTH_PENDING_PROVIDER_KEY)
     clearAllAffiliateReferralCodes()
     appStore.showSuccess(t('auth.loginSuccess'))
-    window.location.href = ccSwitchCallbackUrl
+    // Safari 可能拦截页面加载后的自定义协议跳转。先自动尝试一次，同时保留一个
+    // 由用户手势触发的按钮作为兜底，避免桌面应用一直等待回调。
+    ccSwitchCallbackUrl.value = desktopCallbackUrl
+    openCcSwitch()
     return
   }
 

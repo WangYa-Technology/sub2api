@@ -1,0 +1,140 @@
+name: AMD Linux Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: amd-linux-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-release:
+    name: Build linux amd64 deployment package
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          check-latest: false
+          cache: true
+          cache-dependency-path: backend/go.sum
+
+      - name: Build linux amd64 binary
+        id: build
+        shell: bash
+        working-directory: backend
+        run: |
+          set -euo pipefail
+
+          VERSION="$(./scripts/resolve-version.sh)"
+          TAG="v${VERSION}"
+          COMMIT="${GITHUB_SHA::12}"
+          DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+
+          mkdir -p ../dist/release
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+            -tags embed \
+            -trimpath \
+            -ldflags="-s -w -X main.Version=${VERSION} -X main.Commit=${COMMIT} -X main.Date=${DATE} -X main.BuildType=release" \
+            -o ../dist/release/sub2api \
+            ./cmd/server
+
+          {
+            echo "version=${VERSION}"
+            echo "tag=${TAG}"
+            echo "commit=${COMMIT}"
+            echo "date=${DATE}"
+            echo "archive=sub2api_${VERSION}_linux_amd64.tar.gz"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Package deployment files
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="${{ steps.build.outputs.version }}"
+          ARCHIVE="${{ steps.build.outputs.archive }}"
+          PACKAGE_DIR="dist/package/sub2api_${VERSION}_linux_amd64"
+
+          rm -rf dist/package
+          mkdir -p "${PACKAGE_DIR}/deploy"
+
+          cp dist/release/sub2api "${PACKAGE_DIR}/sub2api"
+          chmod +x "${PACKAGE_DIR}/sub2api"
+
+          cp deploy/config.example.yaml "${PACKAGE_DIR}/deploy/config.example.yaml"
+          cp deploy/sub2api.service "${PACKAGE_DIR}/deploy/sub2api.service"
+          cp deploy/install.sh "${PACKAGE_DIR}/deploy/install.sh"
+          cp deploy/docker-entrypoint.sh "${PACKAGE_DIR}/deploy/docker-entrypoint.sh"
+          cp deploy/README.md "${PACKAGE_DIR}/deploy/README.md"
+
+          tar -C "${PACKAGE_DIR}" -czf "dist/${ARCHIVE}" sub2api deploy
+          gzip -c dist/release/sub2api > dist/sub2api-linux-amd64.gz
+
+          (
+            cd dist
+            sha256sum "${ARCHIVE}" sub2api-linux-amd64.gz > checksums.txt
+          )
+
+          {
+            echo "version=${VERSION}"
+            echo "tag=${{ steps.build.outputs.tag }}"
+            echo "commit=${{ steps.build.outputs.commit }}"
+            echo "built_at=${{ steps.build.outputs.date }}"
+            echo "target=linux_amd64"
+            echo "archive=${ARCHIVE}"
+          } > dist/BUILD_INFO.txt
+
+      - name: Update release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f "${{ steps.build.outputs.tag }}" "${GITHUB_SHA}"
+          git push -f origin "refs/tags/${{ steps.build.outputs.tag }}"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.build.outputs.tag }}
+          name: ${{ steps.build.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          make_latest: true
+          generate_release_notes: true
+          files: |
+            dist/${{ steps.build.outputs.archive }}
+            dist/sub2api-linux-amd64.gz
+            dist/checksums.txt
+            dist/BUILD_INFO.txt

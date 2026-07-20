@@ -23,7 +23,7 @@ function ensureStylesheet() {
   document.head.appendChild(stylesheetElement)
 }
 
-function rewriteStaticAssetPaths(container: ParentNode) {
+function rewriteStaticAssetPaths(container: HTMLElement) {
   container.querySelectorAll<HTMLElement>('[src], [href]').forEach((element) => {
     const attribute = element.hasAttribute('src') ? 'src' : 'href'
     const value = element.getAttribute(attribute)
@@ -51,7 +51,7 @@ onMounted(() => {
     const response = await fetch('/hcai/page.html', { cache: 'no-cache' })
     const html = await response.text()
     const documentFragment = new DOMParser().parseFromString(html, 'text/html')
-    const page = documentFragment.querySelector('.hc-page')
+    const page = documentFragment.querySelector<HTMLElement>('.hc-page')
 
     if (!page) {
       return

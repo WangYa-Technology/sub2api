@@ -17,6 +17,35 @@
   const modelSubtitle = document.querySelector("[data-model-subtitle]");
   const typingTitle = document.querySelector("[data-typing-title]");
 
+  function sanitizeImageUrl(value) {
+    if (typeof value !== "string") {
+      return "";
+    }
+
+    const trimmed = value.trim();
+
+    if (trimmed.startsWith("/") && !trimmed.startsWith("//")) {
+      return trimmed;
+    }
+
+    if (trimmed.startsWith("data:image/")) {
+      return trimmed;
+    }
+
+    try {
+      const parsed = new URL(trimmed);
+      const protocol = parsed.protocol.toLowerCase();
+
+      if (protocol !== "http:" && protocol !== "https:") {
+        return "";
+      }
+
+      return parsed.toString();
+    } catch (_error) {
+      return "";
+    }
+  }
+
   import("/hcai/planets.js?v=gpt56-planets-1")
     .then(function (module) {
       module.initPlanets(document);
@@ -49,7 +78,7 @@
       })
       .then(function (payload) {
         const settings = payload && (payload.data || payload);
-        updateFavicon(settings && settings.site_logo);
+        updateFavicon(sanitizeImageUrl(settings && settings.site_logo));
       })
       .catch(function () {
         // Keep the existing favicon if public settings are unavailable.

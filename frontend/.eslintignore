@@ -9,6 +9,9 @@ node_modules/
 dist/
 ../backend/internal/web/dist/
 
+# HCAI 首页包含独立维护的静态脚本和 vendored Three.js 构建产物。
+public/hcai/
+
 # 忽略缓存
 .cache/
 .vite/

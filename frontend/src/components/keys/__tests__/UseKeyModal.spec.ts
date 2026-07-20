@@ -172,6 +172,32 @@ describe('UseKeyModal', () => {
     )
   })
 
+  it('strips /v1 from Anthropic Claude Code base URL while keeping OpenAI configs unchanged', () => {
+    const wrapper = mount(UseKeyModal, {
+      props: {
+        show: true,
+        apiKey: 'sk-anthropic-test',
+        baseUrl: 'https://example.com/v1',
+        platform: 'anthropic'
+      },
+      global: {
+        stubs: {
+          BaseDialog: {
+            template: '<div><slot /><slot name="footer" /></div>'
+          },
+          Icon: {
+            template: '<span />'
+          }
+        }
+      }
+    })
+
+    const codeBlocks = wrapper.findAll('pre code').map((code) => code.text())
+
+    expect(codeBlocks.join('\n')).toContain('ANTHROPIC_BASE_URL="https://example.com"')
+    expect(codeBlocks.join('\n')).not.toContain('ANTHROPIC_BASE_URL="https://example.com/v1"')
+  })
+
   it('renders Codex custom provider setup through the Grok Responses gateway', async () => {
     const wrapper = mount(UseKeyModal, {
       props: {

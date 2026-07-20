@@ -484,6 +484,7 @@ const currentFiles = computed((): FileConfig[] => {
   const baseUrl = props.baseUrl || window.location.origin
   const apiKey = props.apiKey
   const baseRoot = baseUrl.replace(/\/v1\/?$/, '').replace(/\/+$/, '')
+  const anthropicBase = baseRoot
   const ensureV1 = (value: string) => {
     const trimmed = value.replace(/\/+$/, '')
     return trimmed.endsWith('/v1') ? trimmed : `${trimmed}/v1`
@@ -522,7 +523,7 @@ const currentFiles = computed((): FileConfig[] => {
   switch (props.platform) {
     case 'openai':
       if (activeClientTab.value === 'claude') {
-        return generateAnthropicFiles(baseUrl, apiKey)
+        return generateAnthropicFiles(anthropicBase, apiKey)
       }
       if (activeClientTab.value === 'codex-ws') {
         return generateOpenAIWsFiles(baseUrl, apiKey)
@@ -534,7 +535,7 @@ const currentFiles = computed((): FileConfig[] => {
       if (activeClientTab.value === 'gemini') {
         return [generateGeminiCliContent(`${baseUrl}/antigravity`, apiKey)]
       }
-      return generateAnthropicFiles(`${baseUrl}/antigravity`, apiKey)
+      return generateAnthropicFiles(`${anthropicBase}/antigravity`, apiKey)
     case 'grok':
       if (activeClientTab.value === 'claude') {
         return generateGrokClaudeFiles(baseRoot, apiKey)
@@ -544,7 +545,7 @@ const currentFiles = computed((): FileConfig[] => {
       }
       return generateGrokFiles(apiBase, apiKey)
     default:
-      return generateAnthropicFiles(baseUrl, apiKey)
+      return generateAnthropicFiles(anthropicBase, apiKey)
   }
 })
 

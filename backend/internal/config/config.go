@@ -242,6 +242,7 @@ type ImageStorageConfig struct {
 	SecretAccessKey string `mapstructure:"secret_access_key"`
 	Prefix          string `mapstructure:"prefix"`               // S3 key 前缀，如 "images/"
 	ForcePathStyle  bool   `mapstructure:"force_path_style"`     // MinIO/路径风格桶
+	UseMinIOClient  bool   `mapstructure:"use_minio_client"`     // 使用 minio-go 兼容客户端
 	PublicBaseURL   string `mapstructure:"public_base_url"`      // 配了则返回 public_base_url/key 直链；否则 presigned
 	PresignExpiry   int    `mapstructure:"presign_expiry_hours"` // public_base_url 为空时的 presigned 过期时长(小时)
 	MaxDownloadByte int64  `mapstructure:"max_download_bytes"`   // 下载上游 url 图片的字节上限
@@ -2057,6 +2058,7 @@ func setDefaults() {
 	viper.SetDefault("image_storage.region", "auto")
 	viper.SetDefault("image_storage.prefix", "images/")
 	viper.SetDefault("image_storage.force_path_style", false)
+	viper.SetDefault("image_storage.use_minio_client", false)
 	viper.SetDefault("image_storage.presign_expiry_hours", 24)
 	viper.SetDefault("image_storage.max_download_bytes", 33554432)
 	// Registered with empty defaults so AutomaticEnv can reach them: viper only

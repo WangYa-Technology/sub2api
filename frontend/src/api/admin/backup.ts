@@ -77,6 +77,7 @@ export interface ImageStorageConfig {
   access_key_id: string
   secret_access_key?: string
   force_path_style: boolean
+  use_minio_client: boolean
 }
 
 export interface ImageStorageConfigResponse {

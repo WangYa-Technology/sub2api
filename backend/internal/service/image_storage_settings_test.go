@@ -165,6 +165,7 @@ func TestImageStorageSettingsOwnCredentialsAreEncryptedAndMasked(t *testing.T) {
 		Enabled: true, Bucket: "my-images",
 		Endpoint:    "https://acct.r2.cloudflarestorage.com",
 		AccessKeyID: "ak", SecretAccessKey: "super-secret",
+		UseMinIOClient: true,
 	})
 	require.NoError(t, err)
 	require.Empty(t, saved.SecretAccessKey, "the response must never echo the secret back")
@@ -182,11 +183,13 @@ func TestImageStorageSettingsOwnCredentialsAreEncryptedAndMasked(t *testing.T) {
 	_, enabled := svc.resolve()
 	require.True(t, enabled)
 	require.Equal(t, "super-secret", (*built)[0].SecretAccessKey, "the stored secret must be decrypted before use")
+	require.True(t, (*built)[0].UseMinIOClient)
 
 	// An update that omits the secret keeps the stored one rather than wiping it.
 	_, err = svc.Update(ctx, ImageStorageSettings{
 		Enabled: true, Bucket: "my-images",
 		Endpoint: "https://acct.r2.cloudflarestorage.com", AccessKeyID: "ak",
+		UseMinIOClient: true,
 	})
 	require.NoError(t, err)
 	svc.resolve()
@@ -239,7 +242,7 @@ func TestImageStorageSettingsFallBackToConfigFile(t *testing.T) {
 	svc, _, built := newImageStorageFixture(t, config.ImageStorageConfig{
 		Enabled: true, Endpoint: "https://acct.r2.cloudflarestorage.com", Region: "auto",
 		Bucket: "yaml-bucket", AccessKeyID: "yaml-ak", SecretAccessKey: "yaml-sk",
-		Prefix: "images/", MaxDownloadByte: 1024,
+		Prefix: "images/", MaxDownloadByte: 1024, UseMinIOClient: true,
 	})
 
 	_, enabled := svc.resolve()
@@ -250,5 +253,6 @@ func TestImageStorageSettingsFallBackToConfigFile(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, fetched.Enabled)
 	require.Equal(t, "yaml-bucket", fetched.Bucket)
+	require.True(t, fetched.UseMinIOClient)
 	require.Empty(t, fetched.SecretAccessKey)
 }

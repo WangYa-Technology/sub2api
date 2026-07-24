@@ -42,6 +42,7 @@ type ImageStorageSettings struct {
 	AccessKeyID     string `json:"access_key_id"`
 	SecretAccessKey string `json:"secret_access_key,omitempty"` //nolint:revive // field name follows AWS convention
 	ForcePathStyle  bool   `json:"force_path_style"`
+	UseMinIOClient  bool   `json:"use_minio_client"`
 }
 
 // ImageStorageSettingService 读写后台设置，并把结果解析成一个可直接使用的 uploader。
@@ -171,6 +172,7 @@ func (s *ImageStorageSettingService) Update(ctx context.Context, in ImageStorage
 		// 复用备份凭证时不落自己的密钥，避免同一份密钥在库里存两份。
 		in.Endpoint, in.Region, in.AccessKeyID, in.SecretAccessKey = "", "", "", ""
 		in.ForcePathStyle = false
+		in.UseMinIOClient = false
 	} else if in.SecretAccessKey == "" {
 		if old, err := s.load(ctx); err == nil && old != nil {
 			in.SecretAccessKey = old.SecretAccessKey
@@ -250,6 +252,7 @@ func (s *ImageStorageSettingService) toImageStorageConfig(ctx context.Context, i
 		AccessKeyID:     in.AccessKeyID,
 		SecretAccessKey: in.SecretAccessKey,
 		ForcePathStyle:  in.ForcePathStyle,
+		UseMinIOClient:  in.UseMinIOClient,
 	}
 
 	if in.ReuseBackupS3 {
@@ -317,6 +320,7 @@ func settingsFromConfig(cfg config.ImageStorageConfig) *ImageStorageSettings {
 		AccessKeyID:      cfg.AccessKeyID,
 		SecretAccessKey:  cfg.SecretAccessKey,
 		ForcePathStyle:   cfg.ForcePathStyle,
+		UseMinIOClient:   cfg.UseMinIOClient,
 	}
 }
 

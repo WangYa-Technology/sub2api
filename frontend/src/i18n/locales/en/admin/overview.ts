@@ -113,6 +113,7 @@ export default {
         publicBaseUrl: 'Public base URL',
         publicBaseUrlPlaceholder: 'Leave empty to return presigned links',
         presignExpiryHours: 'Presigned link TTL (hours)',
+        minioAdapter: 'MinIO compatibility',
         saved: 'Async image object storage saved'
       },
       schedule: {

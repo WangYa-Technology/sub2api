@@ -103,10 +103,16 @@
               <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.s3.secretAccessKey') }}</label>
               <input v-model="imageStorageForm.secret_access_key" type="password" class="input w-full" :placeholder="imageStorageSecretConfigured ? t('admin.backup.s3.secretConfigured') : ''" />
             </div>
-            <label class="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 md:col-span-2">
-              <input v-model="imageStorageForm.force_path_style" type="checkbox" />
-              <span>{{ t('admin.backup.s3.forcePathStyle') }}</span>
-            </label>
+            <div class="flex flex-wrap items-center gap-x-6 gap-y-2 md:col-span-2">
+              <label class="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                <input v-model="imageStorageForm.force_path_style" type="checkbox" />
+                <span>{{ t('admin.backup.s3.forcePathStyle') }}</span>
+              </label>
+              <label class="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                <input v-model="imageStorageForm.use_minio_client" type="checkbox" />
+                <span>{{ t('admin.backup.imageStorage.minioAdapter') }}</span>
+              </label>
+            </div>
           </template>
 
           <div>
@@ -412,6 +418,7 @@ const imageStorageForm = ref<ImageStorageConfig>({
   access_key_id: '',
   secret_access_key: '',
   force_path_style: false,
+  use_minio_client: false,
 })
 const imageStorageSecretConfigured = ref(false)
 const savingImageStorage = ref(false)
@@ -592,6 +599,7 @@ async function loadImageStorageConfig() {
       ...config,
       prefix: config.prefix || 'images/',
       region: config.region || 'auto',
+      use_minio_client: config.use_minio_client || false,
       secret_access_key: '',
     }
     imageStorageSecretConfigured.value = secret_configured

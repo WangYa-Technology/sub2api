@@ -1264,6 +1264,8 @@ image_storage:
   prefix: "images/"
   # MinIO / 需要路径风格（path-style）访问的桶设为 true
   force_path_style: false
+  # 异步生图使用 minio-go 兼容客户端；关闭时仍使用默认 AWS SDK S3 客户端
+  use_minio_client: false
   # 若填写公开桶 / CDN 域名，则返回 public_base_url/key 永久直链；
   # 留空则返回带过期时间的 presigned 临时链接
   public_base_url: ""

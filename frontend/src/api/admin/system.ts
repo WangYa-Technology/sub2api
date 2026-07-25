@@ -40,43 +40,9 @@ export async function checkUpdates(force = false): Promise<VersionInfo> {
   return data
 }
 
-export interface UpdateResult {
-  message: string
-  need_restart: boolean
-}
-
-/**
- * In-place update downloads a full release binary from GitHub, which
- * can take several minutes on slow links. The global 30s axios timeout would
- * abort the request mid-download (#4504), so these calls wait as long as the
- * backend allows (15 minutes server-side).
- */
-const UPDATE_REQUEST_TIMEOUT_MS = 15 * 60 * 1000
-
-/**
- * Perform system update
- * Downloads and applies the latest version
- */
-export async function performUpdate(): Promise<UpdateResult> {
-  const { data } = await apiClient.post<UpdateResult>('/admin/system/update', undefined, {
-    timeout: UPDATE_REQUEST_TIMEOUT_MS
-  })
-  return data
-}
-
-/**
- * Restart the service
- */
-export async function restartService(): Promise<{ message: string }> {
-  const { data } = await apiClient.post<{ message: string }>('/admin/system/restart')
-  return data
-}
-
 export const systemAPI = {
   getVersion,
-  checkUpdates,
-  performUpdate,
-  restartService
+  checkUpdates
 }
 
 export default systemAPI

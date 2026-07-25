@@ -274,7 +274,10 @@ export default {
         requestType: 'Type',
         requestTypeSync: 'Sync',
         requestTypeStream: 'Stream',
-        requestTypeWs: 'WS'
+        requestTypeWs: 'WS',
+        requestTypeCyber: 'Cyber',
+        requestTypeLive: 'Live',
+        requestTypeAsync: 'Async'
       },
       // Error Details Modal
       errorDetails: {
@@ -358,6 +361,9 @@ export default {
         requestTypeSync: 'Sync',
         requestTypeStream: 'Stream',
         requestTypeWs: 'WebSocket',
+        requestTypeCyber: 'Cyber',
+        requestTypeLive: 'Live',
+        requestTypeAsync: 'Async',
         modelMapping: 'Model Mapping',
         timings: 'Timings',
         auth: 'Auth',

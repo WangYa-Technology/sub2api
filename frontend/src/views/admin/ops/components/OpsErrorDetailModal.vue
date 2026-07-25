@@ -254,6 +254,9 @@ function formatRequestTypeLabel(type: number | null | undefined): string {
     case 1: return t('admin.ops.errorDetail.requestTypeSync')
     case 2: return t('admin.ops.errorDetail.requestTypeStream')
     case 3: return t('admin.ops.errorDetail.requestTypeWs')
+    case 4: return t('admin.ops.errorDetail.requestTypeCyber')
+    case 5: return t('admin.ops.errorDetail.requestTypeLive')
+    case 6: return t('admin.ops.errorDetail.requestTypeAsync')
     default: return t('admin.ops.errorDetail.requestTypeUnknown')
   }
 }

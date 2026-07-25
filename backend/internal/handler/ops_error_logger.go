@@ -463,6 +463,30 @@ func setOpsEndpointContext(c *gin.Context, upstreamModel string, requestType int
 	c.Set(opsRequestTypeKey, requestType)
 }
 
+// effectiveOpsRequestType preserves an explicit request type installed by an
+// outer adapter (currently asynchronous image execution) while retaining the
+// handler's normal sync/stream fallback for direct requests.
+func effectiveOpsRequestType(c *gin.Context, fallback service.RequestType) service.RequestType {
+	if c == nil {
+		return fallback.Normalize()
+	}
+	if value, ok := c.Get(opsRequestTypeKey); ok {
+		var explicit service.RequestType
+		switch typed := value.(type) {
+		case int16:
+			explicit = service.RequestTypeFromInt16(typed)
+		case int:
+			explicit = service.RequestTypeFromInt16(int16(typed))
+		case service.RequestType:
+			explicit = typed.Normalize()
+		}
+		if explicit != service.RequestTypeUnknown {
+			return explicit
+		}
+	}
+	return fallback.Normalize()
+}
+
 func setOpsSelectedAccount(c *gin.Context, accountID int64, platform ...string) {
 	if c == nil || accountID <= 0 {
 		return

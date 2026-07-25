@@ -26,6 +26,8 @@ type AsyncImageHandler struct {
 	execute func(platform string, c *gin.Context)
 }
 
+const asyncImageOriginalPathContextKey = "_async_image_original_path"
+
 func NewAsyncImageHandler(tasks *service.ImageTaskService, openAI *OpenAIGatewayHandler) *AsyncImageHandler {
 	h := &AsyncImageHandler{tasks: tasks, openAI: openAI}
 	h.execute = h.executeWithGateway
@@ -49,6 +51,11 @@ func (h *AsyncImageHandler) pollable() bool {
 // Submit accepts the same payload as the synchronous Images endpoint and
 // returns before the upstream image generation begins.
 func (h *AsyncImageHandler) Submit(c *gin.Context) {
+	setOpsRequestContext(c, "", false)
+	setOpsEndpointContext(c, "", int16(service.RequestTypeAsync))
+	if c != nil && c.Request != nil && c.Request.URL != nil {
+		c.Set(asyncImageOriginalPathContextKey, c.Request.URL.Path)
+	}
 	if !h.enabled() {
 		imageTaskJSONError(c, http.StatusNotFound, "not_found_error", "async image tasks are not enabled")
 		return
@@ -225,14 +232,18 @@ func (h *AsyncImageHandler) run(taskID, platform string, taskCtx *gin.Context, r
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			logger.L().Error("image_task.execution_panicked", zap.String("task_id", taskID), zap.Any("panic", recovered))
-			h.failTask(taskID, http.StatusInternalServerError, imageTaskErrorPayload("api_error", "image generation task panicked"))
+			taskErr := imageTaskErrorPayload("api_error", "image generation task panicked")
+			h.failTask(taskID, http.StatusInternalServerError, taskErr)
+			h.recordOpsOutcome(taskCtx, http.StatusInternalServerError, wrapImageTaskError(taskErr))
 		}
 	}()
 
 	h.execute(platform, taskCtx)
 	body := bytes.TrimSpace(recorder.Body.Bytes())
 	if err := taskCtx.Request.Context().Err(); err != nil && len(body) == 0 {
-		h.failTask(taskID, http.StatusGatewayTimeout, imageTaskErrorPayload("timeout_error", "image generation task timed out"))
+		taskErr := imageTaskErrorPayload("timeout_error", "image generation task timed out")
+		h.failTask(taskID, http.StatusGatewayTimeout, taskErr)
+		h.recordOpsOutcome(taskCtx, http.StatusGatewayTimeout, wrapImageTaskError(taskErr))
 		return
 	}
 	statusCode := recorder.Code
@@ -241,15 +252,35 @@ func (h *AsyncImageHandler) run(taskID, platform string, taskCtx *gin.Context, r
 	}
 	if statusCode >= http.StatusOK && statusCode < http.StatusMultipleChoices {
 		if len(body) == 0 || !json.Valid(body) {
-			h.failTask(taskID, http.StatusBadGateway, imageTaskErrorPayload("api_error", "upstream returned an invalid image response"))
+			taskErr := imageTaskErrorPayload("api_error", "upstream returned an invalid image response")
+			h.failTask(taskID, http.StatusBadGateway, taskErr)
+			h.recordOpsOutcome(taskCtx, http.StatusBadGateway, wrapImageTaskError(taskErr))
 			return
 		}
-		if err := h.tasks.Complete(context.Background(), taskID, statusCode, json.RawMessage(body)); err != nil {
+		completion, err := h.tasks.Complete(context.Background(), taskID, statusCode, json.RawMessage(body))
+		if err != nil {
 			logger.L().Error("image_task.complete_store_failed", zap.String("task_id", taskID), zap.Error(err))
+			taskErr := imageTaskErrorPayload("api_error", "failed to persist image task result")
+			h.recordOpsOutcome(taskCtx, http.StatusInternalServerError, wrapImageTaskError(taskErr))
+			return
 		}
+		if completion != nil && completion.Status == service.ImageTaskStatusFailed {
+			h.recordOpsOutcome(taskCtx, completion.HTTPStatus, wrapImageTaskError(completion.Error))
+			return
+		}
+		h.recordOpsOutcome(taskCtx, statusCode, body)
 		return
 	}
-	h.failTask(taskID, statusCode, extractImageTaskError(body))
+	taskErr := extractImageTaskError(body)
+	h.failTask(taskID, statusCode, taskErr)
+	h.recordOpsOutcome(taskCtx, statusCode, body)
+}
+
+func (h *AsyncImageHandler) recordOpsOutcome(c *gin.Context, statusCode int, body []byte) {
+	if h == nil || h.openAI == nil {
+		return
+	}
+	recordAsyncImageOpsOutcome(c, h.openAI.opsService, statusCode, body)
 }
 
 func (h *AsyncImageHandler) failTask(taskID string, statusCode int, taskErr json.RawMessage) {
@@ -274,6 +305,7 @@ func newAsyncImageContext(c *gin.Context, body []byte, timeoutDuration time.Dura
 	recorderCtx, _ := gin.CreateTestContext(recorder)
 	taskCtx.Writer = recorderCtx.Writer
 	taskCtx.Request = request
+	setOpsEndpointContext(taskCtx, "", int16(service.RequestTypeAsync))
 	return taskCtx, recorder, cancel
 }
 
@@ -309,6 +341,17 @@ func extractImageTaskError(body []byte) json.RawMessage {
 
 func imageTaskErrorPayload(errorType, message string) json.RawMessage {
 	data, _ := json.Marshal(gin.H{"type": errorType, "message": message})
+	return data
+}
+
+func wrapImageTaskError(taskErr json.RawMessage) []byte {
+	if !json.Valid(taskErr) {
+		return []byte(`{"error":{"type":"api_error","message":"image generation failed"}}`)
+	}
+	data, err := json.Marshal(gin.H{"error": taskErr})
+	if err != nil {
+		return []byte(`{"error":{"type":"api_error","message":"image generation failed"}}`)
+	}
 	return data
 }
 

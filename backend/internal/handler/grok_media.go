@@ -112,7 +112,8 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 
 	reqLog = reqLog.With(zap.String("model", requestModel))
 	setOpsRequestContext(c, requestModel, false)
-	setOpsEndpointContext(c, "", int16(service.RequestTypeSync))
+	requestType := effectiveOpsRequestType(c, service.RequestTypeSync)
+	setOpsEndpointContext(c, "", int16(requestType))
 
 	if endpoint.IsGenerationRequest() {
 		if !service.GroupAllowsImageGeneration(apiKey.Group) {
@@ -473,6 +474,7 @@ func recordGrokMediaUsage(
 	inboundEndpoint := GetInboundEndpoint(c)
 	upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 	quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
+	requestType := effectiveOpsRequestType(c, service.RequestTypeSync)
 	// OriginalModel 记录客户端请求的模型：composite 分组下 body 已被改写为具体模型，
 	// 公开别名需从 context 取回，与其他端点的用量归因口径一致（计费不受影响：
 	// BillingModelSource 为空不会触发来源覆盖）。
@@ -494,6 +496,7 @@ func recordGrokMediaUsage(
 			RequestPayloadHash: service.HashUsageRequestPayload(payloadForHash),
 			APIKeyService:      h.apiKeyService,
 			QuotaPlatform:      quotaPlatform,
+			RequestType:        requestType,
 			SessionID:          sessionID,
 			ChannelUsageFields: channelUsageFields,
 		}); err != nil {

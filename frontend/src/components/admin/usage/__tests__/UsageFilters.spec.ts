@@ -17,8 +17,11 @@ const messages: Record<string, string> = {
   'usage.type': 'Type',
   'admin.usage.allTypes': 'All Types',
   'usage.ws': 'WS',
+  'usage.live': 'Live',
+  'usage.async': 'Async',
   'usage.stream': 'Stream',
   'usage.sync': 'Sync',
+  'usage.cyber': 'Cyber',
   'admin.usage.billingType': 'Billing Type',
   'admin.usage.allBillingTypes': 'All Billing Types',
   'admin.usage.billingTypeBalance': 'Balance',
@@ -252,5 +255,14 @@ describe('UsageFilters — model options come from prop (no dup request)', () =>
 
     const opts = (wrapper.vm as any).modelOptions as Array<{ value: string | null; label: string }>
     expect(opts.map((o) => o.value)).toEqual([null, 'claude-3', 'gpt-4o'])
+  })
+})
+
+describe('UsageFilters — request type options', () => {
+  it('includes async as a selectable request type', () => {
+    const wrapper = mountFilters()
+    const options = (wrapper.vm as any).requestTypeOptions as Array<{ value: string | null; label: string }>
+
+    expect(options).toContainEqual({ value: 'async', label: 'Async' })
   })
 })

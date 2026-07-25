@@ -324,6 +324,39 @@ func TestOpenAIGatewayServiceRecordUsage_ZeroUsageStillWritesUsageLog(t *testing
 	require.Zero(t, billingRepo.lastCmd.AccountQuotaCost)
 }
 
+func TestOpenAIGatewayServiceRecordUsage_PreservesExplicitAsyncType(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
+	svc := newOpenAIRecordUsageServiceWithBillingRepoForTest(
+		usageRepo,
+		billingRepo,
+		&openAIRecordUsageUserRepoStub{},
+		&openAIRecordUsageSubRepoStub{},
+		nil,
+	)
+
+	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID:  "resp_async_image",
+			Model:      "gpt-image-1",
+			ImageCount: 1,
+			ImageSize:  "1024x1024",
+			Duration:   time.Second,
+		},
+		APIKey:      &APIKey{ID: 1001, Group: &Group{RateMultiplier: 1}},
+		User:        &User{ID: 2001},
+		Account:     &Account{ID: 3001, Type: AccountTypeAPIKey},
+		RequestType: RequestTypeAsync,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, usageRepo.calls)
+	require.NotNil(t, usageRepo.lastLog)
+	require.Equal(t, RequestTypeAsync, usageRepo.lastLog.RequestType)
+	require.False(t, usageRepo.lastLog.Stream)
+	require.False(t, usageRepo.lastLog.OpenAIWSMode)
+}
+
 func TestOpenAIGatewayServiceRecordUsage_MissingPricingRecordsZeroCostUsageLog(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}

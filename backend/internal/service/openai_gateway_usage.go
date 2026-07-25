@@ -33,6 +33,9 @@ type OpenAIRecordUsageInput struct {
 	RequestPayloadHash string
 	APIKeyService      APIKeyQuotaUpdater
 	QuotaPlatform      string // user×platform quota platform resolved by the handler before async billing.
+	// RequestType allows protocol adapters to preserve a semantic request type
+	// that cannot be inferred from the synchronous upstream transport.
+	RequestType RequestType
 	// CyberBlocked 为 true 时把该用量行标记为 cyber（request_type=cyber），计费逻辑不变。
 	CyberBlocked bool
 	ChannelUsageFields
@@ -302,10 +305,15 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	usageLog.AccountRateMultiplier = &accountRateMultiplier
 	usageLog.BillingType = billingType
 	usageLog.Stream = result.Stream
+	usageLog.RequestType = RequestTypeFromLegacy(result.Stream, result.OpenAIWSMode)
+	if explicit := input.RequestType.Normalize(); explicit != RequestTypeUnknown {
+		usageLog.RequestType = explicit
+	}
 	if input.CyberBlocked {
 		usageLog.RequestType = RequestTypeCyberBlocked
 	}
 	usageLog.OpenAIWSMode = result.OpenAIWSMode
+	usageLog.Stream, usageLog.OpenAIWSMode = ApplyLegacyRequestFields(usageLog.RequestType, usageLog.Stream, usageLog.OpenAIWSMode)
 	usageLog.DurationMs = &durationMs
 	usageLog.FirstTokenMs = result.FirstTokenMs
 	usageLog.CreatedAt = time.Now()

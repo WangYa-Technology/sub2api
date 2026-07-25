@@ -106,6 +106,40 @@ func TestAsyncImageHandlerSubmitAndPoll(t *testing.T) {
 	require.Contains(t, pollWriter.Body.String(), "https://example.test/image.png")
 }
 
+func TestAsyncImageExecutionPreservesTypeAndEndpointForAllImageRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name             string
+		platform         string
+		path             string
+		inboundEndpoint  string
+		upstreamEndpoint string
+	}{
+		{name: "openai generation", platform: service.PlatformOpenAI, path: "/v1/images/generations/async", inboundEndpoint: EndpointImagesGenerationsAsync, upstreamEndpoint: EndpointImagesGenerations},
+		{name: "openai edit", platform: service.PlatformOpenAI, path: "/v1/images/edits/async", inboundEndpoint: EndpointImagesEditsAsync, upstreamEndpoint: EndpointImagesEdits},
+		{name: "grok generation", platform: service.PlatformGrok, path: "/v1/images/generations/async", inboundEndpoint: EndpointImagesGenerationsAsync, upstreamEndpoint: EndpointImagesGenerations},
+		{name: "grok edit", platform: service.PlatformGrok, path: "/v1/images/edits/async", inboundEndpoint: EndpointImagesEditsAsync, upstreamEndpoint: EndpointImagesEdits},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, tt.path, strings.NewReader(`{"model":"test-image-model"}`))
+			c.Set(ctxKeyInboundEndpoint, NormalizeInboundEndpoint(tt.path))
+			c.Set(asyncImageOriginalPathContextKey, tt.path)
+			setOpsEndpointContext(c, "", int16(service.RequestTypeAsync))
+
+			taskCtx, _, cancel := newAsyncImageContext(c, []byte(`{"model":"test-image-model"}`), time.Minute)
+			defer cancel()
+
+			require.Equal(t, tt.inboundEndpoint, GetInboundEndpoint(taskCtx))
+			require.Equal(t, tt.upstreamEndpoint, GetUpstreamEndpoint(taskCtx, tt.platform))
+			require.Equal(t, service.RequestTypeAsync, effectiveOpsRequestType(taskCtx, service.RequestTypeSync))
+			require.Equal(t, strings.TrimSuffix(tt.path, "/async"), taskCtx.Request.URL.Path)
+		})
+	}
+}
+
 // When object storage is not configured the feature is fully disabled: the
 // endpoints must return 404 without creating a task or writing to Redis.
 func TestAsyncImageHandlerDisabledReturns404(t *testing.T) {

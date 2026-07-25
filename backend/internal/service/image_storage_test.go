@@ -124,7 +124,9 @@ func TestImageTaskServiceCompleteOffloadsToStorage(t *testing.T) {
 
 	b64 := base64.StdEncoding.EncodeToString(pngBytes)
 	result := json.RawMessage(`{"created":1,"data":[{"b64_json":"` + b64 + `"}]}`)
-	require.NoError(t, svc.Complete(context.Background(), created.ID, http.StatusOK, result))
+	completion, err := svc.Complete(context.Background(), created.ID, http.StatusOK, result)
+	require.NoError(t, err)
+	require.Equal(t, ImageTaskStatusCompleted, completion.Status)
 
 	got, err := svc.Get(context.Background(), owner, created.ID)
 	require.NoError(t, err)
@@ -146,7 +148,10 @@ func TestImageTaskServiceCompleteOffloadFailureMarksFailed(t *testing.T) {
 
 	b64 := base64.StdEncoding.EncodeToString(pngBytes)
 	result := json.RawMessage(`{"data":[{"b64_json":"` + b64 + `"}]}`)
-	require.NoError(t, svc.Complete(context.Background(), created.ID, http.StatusOK, result))
+	completion, err := svc.Complete(context.Background(), created.ID, http.StatusOK, result)
+	require.NoError(t, err)
+	require.Equal(t, ImageTaskStatusFailed, completion.Status)
+	require.Equal(t, http.StatusBadGateway, completion.HTTPStatus)
 
 	got, err := svc.Get(context.Background(), owner, created.ID)
 	require.NoError(t, err)

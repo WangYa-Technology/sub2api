@@ -57,7 +57,9 @@ func TestImageTaskServiceLifecycleAndOwnership(t *testing.T) {
 	require.ErrorIs(t, err, ErrImageTaskNotFound)
 
 	result := json.RawMessage(`{"created":123,"data":[{"url":"https://example.test/image.png"}]}`)
-	require.NoError(t, svc.Complete(context.Background(), created.ID, http.StatusOK, result))
+	completion, err := svc.Complete(context.Background(), created.ID, http.StatusOK, result)
+	require.NoError(t, err)
+	require.Equal(t, ImageTaskStatusCompleted, completion.Status)
 
 	completed, err := svc.Get(context.Background(), owner, created.ID)
 	require.NoError(t, err)
@@ -74,7 +76,10 @@ func TestImageTaskServiceInvalidResultBecomesFailed(t *testing.T) {
 	created, err := svc.Create(context.Background(), ImageTaskOwner{UserID: 1, APIKeyID: 2})
 	require.NoError(t, err)
 
-	require.NoError(t, svc.Complete(context.Background(), created.ID, http.StatusOK, json.RawMessage(`not-json`)))
+	completion, err := svc.Complete(context.Background(), created.ID, http.StatusOK, json.RawMessage(`not-json`))
+	require.NoError(t, err)
+	require.Equal(t, ImageTaskStatusFailed, completion.Status)
+	require.Equal(t, http.StatusBadGateway, completion.HTTPStatus)
 	got, err := svc.Get(context.Background(), ImageTaskOwner{UserID: 1, APIKeyID: 2}, created.ID)
 	require.NoError(t, err)
 	require.Equal(t, ImageTaskStatusFailed, got.Status)

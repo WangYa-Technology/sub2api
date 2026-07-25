@@ -64,6 +64,16 @@ type ImageTaskOwner struct {
 	APIKeyID int64
 }
 
+// ImageTaskCompletion describes the terminal state persisted by Complete.
+// A failed state with nil error means the failure itself (for example object
+// storage offload) was persisted successfully and should be reported by the
+// background request observer.
+type ImageTaskCompletion struct {
+	Status     string
+	HTTPStatus int
+	Error      json.RawMessage
+}
+
 type ImageTaskStore interface {
 	Save(ctx context.Context, task *ImageTaskRecord, ttl time.Duration) error
 	Get(ctx context.Context, id string) (*ImageTaskRecord, error)
@@ -187,20 +197,31 @@ func (s *ImageTaskService) Get(ctx context.Context, owner ImageTaskOwner, id str
 	return imageTaskToPublic(task), nil
 }
 
-func (s *ImageTaskService) Complete(ctx context.Context, id string, statusCode int, result json.RawMessage) error {
+func (s *ImageTaskService) Complete(ctx context.Context, id string, statusCode int, result json.RawMessage) (*ImageTaskCompletion, error) {
 	if !json.Valid(result) {
-		return s.Fail(ctx, id, http.StatusBadGateway, imageTaskErrorJSON("api_error", "upstream returned a non-JSON image response"))
+		taskErr := imageTaskErrorJSON("api_error", "upstream returned a non-JSON image response")
+		if err := s.Fail(ctx, id, http.StatusBadGateway, taskErr); err != nil {
+			return nil, err
+		}
+		return &ImageTaskCompletion{Status: ImageTaskStatusFailed, HTTPStatus: http.StatusBadGateway, Error: taskErr}, nil
 	}
 	if uploader, _ := s.current(); uploader != nil {
 		rewritten, err := uploader.Rewrite(ctx, id, result)
 		if err != nil {
 			// 转存失败不回退存 base64，避免大 blob 撑爆 Redis：直接把任务标记为失败。
 			logger.L().Error("image_task.offload_failed", zap.String("task_id", id), zap.Error(err))
-			return s.Fail(ctx, id, http.StatusBadGateway, imageTaskErrorJSON("api_error", "failed to store generated image to object storage"))
+			taskErr := imageTaskErrorJSON("api_error", "failed to store generated image to object storage")
+			if failErr := s.Fail(ctx, id, http.StatusBadGateway, taskErr); failErr != nil {
+				return nil, failErr
+			}
+			return &ImageTaskCompletion{Status: ImageTaskStatusFailed, HTTPStatus: http.StatusBadGateway, Error: taskErr}, nil
 		}
 		result = rewritten
 	}
-	return s.finish(ctx, id, ImageTaskStatusCompleted, statusCode, result, nil)
+	if err := s.finish(ctx, id, ImageTaskStatusCompleted, statusCode, result, nil); err != nil {
+		return nil, err
+	}
+	return &ImageTaskCompletion{Status: ImageTaskStatusCompleted, HTTPStatus: statusCode}, nil
 }
 
 func (s *ImageTaskService) Fail(ctx context.Context, id string, statusCode int, taskErr json.RawMessage) error {

@@ -73,6 +73,13 @@ describe('OpsErrorLogTable user/api-key/account columns', () => {
     expect(wrapper.text()).toContain('old-key')
     expect(wrapper.text()).toContain('admin.ops.errorLog.keyDeletedBadge')
   })
+
+  it('renders request_type 6 as an async badge', () => {
+    const wrapper = mountTable({ request_type: 6 })
+
+    const badge = wrapper.get('.bg-cyan-100')
+    expect(badge.text()).toBe('admin.ops.errorLog.requestTypeAsync')
+  })
 })
 
 // 防回归:组件用 admin.ops.errorLog.* 命名空间。若 i18n 键写错命名空间(如误放到
@@ -84,10 +91,13 @@ describe('OpsErrorLogTable user/api-key/account columns', () => {
 describe('OpsErrorLogTable i18n keys exist in the errorLog namespace', () => {
   const locales: Record<string, any> = { zh: zhLocale, en: enLocale }
   for (const [name, msgs] of Object.entries(locales)) {
-    it(`has apiKey & keyDeletedBadge for ${name}`, () => {
+    it(`has request type and api key labels for ${name}`, () => {
       const errorLog = msgs?.admin?.ops?.errorLog
       expect(errorLog?.apiKey).toBeTruthy()
       expect(errorLog?.keyDeletedBadge).toBeTruthy()
+      expect(errorLog?.requestTypeLive).toBeTruthy()
+      expect(errorLog?.requestTypeAsync).toBeTruthy()
+      expect(msgs?.admin?.ops?.errorDetail?.requestTypeAsync).toBeTruthy()
     })
   }
 })

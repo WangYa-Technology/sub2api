@@ -21,6 +21,8 @@ func TestParseUsageRequestType(t *testing.T) {
 		{name: "sync", input: "sync", want: RequestTypeSync},
 		{name: "stream", input: "stream", want: RequestTypeStream},
 		{name: "ws_v2", input: "ws_v2", want: RequestTypeWSV2},
+		{name: "live", input: "live", want: RequestTypeLive},
+		{name: "async", input: "async", want: RequestTypeAsync},
 		{name: "case_insensitive", input: "WS_V2", want: RequestTypeWSV2},
 		{name: "trim_spaces", input: "  stream  ", want: RequestTypeStream},
 		{name: "invalid", input: "xxx", wantErr: true},
@@ -49,6 +51,8 @@ func TestRequestTypeNormalizeAndString(t *testing.T) {
 	require.Equal(t, "sync", RequestTypeSync.String())
 	require.Equal(t, "stream", RequestTypeStream.String())
 	require.Equal(t, "ws_v2", RequestTypeWSV2.String())
+	require.Equal(t, "live", RequestTypeLive.String())
+	require.Equal(t, "async", RequestTypeAsync.String())
 }
 
 func TestRequestTypeFromLegacy(t *testing.T) {
@@ -77,6 +81,19 @@ func TestApplyLegacyRequestFields(t *testing.T) {
 	stream, ws = ApplyLegacyRequestFields(RequestTypeUnknown, true, false)
 	require.True(t, stream)
 	require.False(t, ws)
+
+	stream, ws = ApplyLegacyRequestFields(RequestTypeAsync, true, true)
+	require.False(t, stream)
+	require.False(t, ws)
+}
+
+func TestRequestTypeAsyncDoesNotConflictWithLive(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, RequestType(5), RequestTypeLive)
+	require.Equal(t, RequestType(6), RequestTypeAsync)
+	require.True(t, RequestTypeAsync.IsValid())
+	require.Equal(t, RequestTypeAsync, RequestTypeFromInt16(6))
 }
 
 func TestUsageLogSyncRequestTypeAndLegacyFields(t *testing.T) {

@@ -15,20 +15,22 @@ import (
 // ──────────────────────────────────────────────────────────
 
 const (
-	EndpointMessages          = "/v1/messages"
-	EndpointChatCompletions   = "/v1/chat/completions"
-	EndpointEmbeddings        = "/v1/embeddings"
-	EndpointAlphaSearch       = "/v1/alpha/search"
-	EndpointResponses         = "/v1/responses"
-	EndpointResponsesCompact  = "/v1/responses/compact"
-	EndpointImagesGenerations = "/v1/images/generations"
-	EndpointImagesEdits       = "/v1/images/edits"
-	EndpointImageTasks        = "/v1/images/tasks"
-	EndpointVideosGenerations = "/v1/videos/generations"
-	EndpointVideosEdits       = "/v1/videos/edits"
-	EndpointVideosExtensions  = "/v1/videos/extensions"
-	EndpointVideos            = "/v1/videos"
-	EndpointGeminiModels      = "/v1beta/models"
+	EndpointMessages               = "/v1/messages"
+	EndpointChatCompletions        = "/v1/chat/completions"
+	EndpointEmbeddings             = "/v1/embeddings"
+	EndpointAlphaSearch            = "/v1/alpha/search"
+	EndpointResponses              = "/v1/responses"
+	EndpointResponsesCompact       = "/v1/responses/compact"
+	EndpointImagesGenerationsAsync = "/v1/images/generations/async"
+	EndpointImagesEditsAsync       = "/v1/images/edits/async"
+	EndpointImagesGenerations      = "/v1/images/generations"
+	EndpointImagesEdits            = "/v1/images/edits"
+	EndpointImageTasks             = "/v1/images/tasks"
+	EndpointVideosGenerations      = "/v1/videos/generations"
+	EndpointVideosEdits            = "/v1/videos/edits"
+	EndpointVideosExtensions       = "/v1/videos/extensions"
+	EndpointVideos                 = "/v1/videos"
+	EndpointGeminiModels           = "/v1beta/models"
 )
 
 // gin.Context keys used by the middleware and helpers below.
@@ -85,6 +87,10 @@ func NormalizeInboundEndpoint(path string) string {
 		return EndpointChatCompletions
 	case strings.Contains(path, EndpointMessages):
 		return EndpointMessages
+	case strings.Contains(path, EndpointImagesGenerationsAsync) || strings.Contains(path, "/images/generations/async"):
+		return EndpointImagesGenerationsAsync
+	case strings.Contains(path, EndpointImagesEditsAsync) || strings.Contains(path, "/images/edits/async"):
+		return EndpointImagesEditsAsync
 	case strings.Contains(path, EndpointImagesGenerations) || strings.Contains(path, "/images/generations"):
 		return EndpointImagesGenerations
 	case strings.Contains(path, EndpointImagesEdits) || strings.Contains(path, "/images/edits"):
@@ -182,6 +188,12 @@ func DeriveUpstreamEndpoint(inbound, rawRequestPath, platform string) string {
 
 	switch platform {
 	case service.PlatformOpenAI, service.PlatformGrok:
+		if inbound == EndpointImagesGenerationsAsync {
+			return EndpointImagesGenerations
+		}
+		if inbound == EndpointImagesEditsAsync {
+			return EndpointImagesEdits
+		}
 		if inbound == EndpointEmbeddings || inbound == EndpointAlphaSearch || inbound == EndpointImagesGenerations || inbound == EndpointImagesEdits || inbound == EndpointVideosGenerations || inbound == EndpointVideosEdits || inbound == EndpointVideosExtensions || inbound == EndpointVideos {
 			return inbound
 		}

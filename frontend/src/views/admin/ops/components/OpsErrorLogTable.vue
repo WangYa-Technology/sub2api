@@ -117,7 +117,8 @@
             >{{ row.severity }}</span>
             <span
               v-if="row.request_type != null && row.request_type > 0"
-              class="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-800 dark:bg-dark-700 dark:text-gray-200"
+              class="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium"
+              :class="requestTypeClass(row.request_type)"
             >{{ formatRequestType(row.request_type) }}</span>
           </div>
         </template>
@@ -190,7 +191,7 @@ import type { OpsErrorLog } from '@/api/admin/ops'
 import type { Column } from '@/components/common/types'
 import { getSeverityClass, formatDateTime } from '../utils/opsFormatters'
 import { mapErrorCategory } from '@/utils/errorCategory'
-import { mapErrorSortKey, statusCodeBadgeClass } from '@/utils/errorBadges'
+import { mapErrorSortKey, numericRequestTypeKind, requestTypeBadgeClass, statusCodeBadgeClass } from '@/utils/errorBadges'
 
 const { t } = useI18n()
 
@@ -246,8 +247,16 @@ function formatRequestType(type: number | null | undefined): string {
     case 1: return t('admin.ops.errorLog.requestTypeSync')
     case 2: return t('admin.ops.errorLog.requestTypeStream')
     case 3: return t('admin.ops.errorLog.requestTypeWs')
+    case 4: return t('admin.ops.errorLog.requestTypeCyber')
+    case 5: return t('admin.ops.errorLog.requestTypeLive')
+    case 6: return t('admin.ops.errorLog.requestTypeAsync')
     default: return ''
   }
+}
+
+function requestTypeClass(type: number | null | undefined): string {
+  const kind = numericRequestTypeKind(type)
+  return kind ? requestTypeBadgeClass(kind) : requestTypeBadgeClass('unknown')
 }
 
 // 徽章配色对齐用量明细(UsageTable)的 bg-X-100/text-X-800 体系

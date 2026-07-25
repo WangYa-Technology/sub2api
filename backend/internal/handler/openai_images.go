@@ -112,7 +112,8 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	}
 
 	setOpsRequestContext(c, clientRequestModel, parsed.Stream)
-	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(parsed.Stream, false)))
+	requestType := effectiveOpsRequestType(c, service.RequestTypeFromLegacy(parsed.Stream, false))
+	setOpsEndpointContext(c, "", int16(requestType))
 
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, routingModel)
 
@@ -391,6 +392,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 				RequestPayloadHash: requestPayloadHash,
 				APIKeyService:      h.apiKeyService,
 				QuotaPlatform:      quotaPlatform,
+				RequestType:        requestType,
 				SessionID:          sessionID,
 				ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, requestModel, upstreamModel),
 			}); err != nil {

@@ -318,6 +318,7 @@ export default {
     sync: 'Sync',
     cyber: 'Cyber',
     live: 'Live',
+    async: 'Async',
     unknown: 'Unknown',
     in: 'In',
     out: 'Out',

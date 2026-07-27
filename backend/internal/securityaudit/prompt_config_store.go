@@ -23,6 +23,11 @@ type activeConfigSnapshot struct {
 	loadedAt time.Time
 }
 
+type publicConfigSnapshot struct {
+	storage            storageConfig
+	riskControlEnabled bool
+}
+
 type ConfigManager struct {
 	db        *sql.DB
 	settings  service.SettingRepository
@@ -31,6 +36,7 @@ type ConfigManager struct {
 	clock     Clock
 
 	snapshot atomic.Pointer[activeConfigSnapshot]
+	public   atomic.Pointer[publicConfigSnapshot]
 	expected atomic.Int64
 	// expectedBlocking records the last storage intent that could be decoded,
 	// independently of whether endpoint credentials or the full config could be
@@ -115,6 +121,10 @@ func (m *ConfigManager) Reload(ctx context.Context) error {
 		m.markUntrustedIfNoActiveSnapshot()
 		return err
 	}
+	m.public.Store(&publicConfigSnapshot{
+		storage:            cloneStorageConfig(storage),
+		riskControlEnabled: values[SettingKeyRiskControl] == "true",
+	})
 	m.expected.Store(storage.ConfigVersion)
 	m.expectedBlocking.Store(values[SettingKeyRiskControl] == "true" && storage.Enabled && storage.BlockingEnabled)
 	active, err := ActiveFromStorage(storage, values[SettingKeyRiskControl] == "true", m.encryptor)
@@ -194,15 +204,15 @@ func (m *ConfigManager) markUntrustedIfNoActiveSnapshot() {
 	}
 }
 
-func (m *ConfigManager) Public() PublicConfig {
+func (m *ConfigManager) Public() (PublicConfig, error) {
 	if m == nil {
-		return PublicFromStorage(DefaultStorageConfig(), false)
+		return PublicConfig{}, infraerrors.ServiceUnavailable(ErrorCodeConfigUnavailable, "提示词审计配置暂不可用")
 	}
-	snapshot := m.snapshot.Load()
+	snapshot := m.public.Load()
 	if snapshot == nil {
-		return PublicFromStorage(DefaultStorageConfig(), false)
+		return PublicConfig{}, infraerrors.ServiceUnavailable(ErrorCodeConfigUnavailable, "提示词审计配置暂不可用")
 	}
-	return PublicFromStorage(cloneStorageConfig(snapshot.storage), snapshot.active.RiskControlEnabled)
+	return PublicFromStorage(cloneStorageConfig(snapshot.storage), snapshot.riskControlEnabled), nil
 }
 
 func (m *ConfigManager) Save(ctx context.Context, req UpdateConfigRequest, actorID int64) (PublicConfig, error) {
@@ -268,6 +278,10 @@ func (m *ConfigManager) Save(ctx context.Context, req UpdateConfigRequest, actor
 	}
 	m.expected.Store(next.ConfigVersion)
 	m.expectedBlocking.Store(active.RiskControlEnabled && next.Enabled && next.BlockingEnabled)
+	m.public.Store(&publicConfigSnapshot{
+		storage:            cloneStorageConfig(next),
+		riskControlEnabled: active.RiskControlEnabled,
+	})
 	m.snapshot.Store(&activeConfigSnapshot{storage: cloneStorageConfig(next), active: cloneActiveConfig(active), loadedAt: m.clock.Now()})
 	// A successful admin save installs a trustworthy snapshot; clear any prior
 	// fail-closed degradation so disabling audit actually takes effect.

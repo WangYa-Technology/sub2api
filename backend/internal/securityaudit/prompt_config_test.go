@@ -15,6 +15,11 @@ type prefixEncryptor struct{}
 func (prefixEncryptor) Encrypt(value string) (string, error) { return "enc:" + value, nil }
 func (prefixEncryptor) Decrypt(value string) (string, error) { return value[4:], nil }
 
+type failingDecryptor struct{}
+
+func (failingDecryptor) Encrypt(value string) (string, error) { return "enc:" + value, nil }
+func (failingDecryptor) Decrypt(string) (string, error)       { return "", errors.New("decrypt failed") }
+
 func TestDefaultConfigIsOff(t *testing.T) {
 	storage, err := ParseStorageConfig("")
 	require.NoError(t, err)
@@ -54,6 +59,86 @@ func TestConfigRuntimeLoadErrorIsStableBoundedAndSecretFree(t *testing.T) {
 	require.Equal(t, stableErrorMessage("config_load_failed"), message)
 	require.NotContains(t, message, canary)
 	require.LessOrEqual(t, len([]rune(message)), 160)
+}
+
+func TestConfigManagerPublicRequiresSuccessfullyLoadedSnapshot(t *testing.T) {
+	t.Run("absent persisted setting is legitimate default", func(t *testing.T) {
+		manager := NewConfigManager(nil, staticSettingRepository{values: map[string]string{
+			SettingKeyPromptAuditConfig: "",
+			SettingKeyRiskControl:       "false",
+		}}, nil, prefixEncryptor{})
+		require.NoError(t, manager.Reload(context.Background()))
+
+		public, err := manager.Public()
+		require.NoError(t, err)
+		require.Equal(t, int64(1), public.ConfigVersion)
+		require.False(t, public.Enabled)
+	})
+
+	t.Run("invalid persisted config is unavailable", func(t *testing.T) {
+		const canary = "persisted-token-canary"
+		manager := NewConfigManager(nil, staticSettingRepository{values: map[string]string{
+			SettingKeyPromptAuditConfig: `{"enabled":true,"config_version":9,"endpoints":[{"token_ciphertext":"` + canary + `"}]}`,
+			SettingKeyRiskControl:       "true",
+		}}, nil, prefixEncryptor{})
+		require.Error(t, manager.Reload(context.Background()))
+
+		public, err := manager.Public()
+		require.Error(t, err)
+		require.Empty(t, public)
+		require.Equal(t, ErrorCodeConfigUnavailable, infraerrors.Reason(err))
+		require.NotContains(t, err.Error(), canary)
+	})
+
+	t.Run("activation failure remains available for admin recovery", func(t *testing.T) {
+		const canary = "persisted-token-canary"
+		storage := DefaultStorageConfig()
+		storage.Enabled = true
+		storage.ConfigVersion = 9
+		storage.Endpoints = []StorageEndpoint{{
+			ID: "guard-1", Name: "Guard One", Protocol: "openai_compatible",
+			BaseURL: "http://127.0.0.1:8080", Model: DefaultGuardModel,
+			TokenCiphertext: canary, TimeoutMS: 1000, InputLimit: 1000, Enabled: true,
+		}}
+		raw, err := json.Marshal(storage)
+		require.NoError(t, err)
+		manager := NewConfigManager(nil, staticSettingRepository{values: map[string]string{
+			SettingKeyPromptAuditConfig: string(raw),
+			SettingKeyRiskControl:       "true",
+		}}, nil, failingDecryptor{})
+		require.Error(t, manager.Reload(context.Background()))
+
+		public, err := manager.Public()
+		require.NoError(t, err)
+		require.Equal(t, int64(9), public.ConfigVersion)
+		require.True(t, public.Enabled)
+		require.Len(t, public.Endpoints, 1)
+		require.True(t, public.Endpoints[0].HasToken)
+		require.NotContains(t, public.Endpoints[0].TokenStatus, canary)
+		_, active := manager.Active()
+		require.False(t, active)
+	})
+
+	t.Run("reload failure preserves last successfully loaded snapshot", func(t *testing.T) {
+		storage := DefaultStorageConfig()
+		storage.ConfigVersion = 4
+		storage.ChangeSummary = "trusted snapshot"
+		raw, err := json.Marshal(storage)
+		require.NoError(t, err)
+		repository := &switchableSettingRepository{staticSettingRepository: staticSettingRepository{values: map[string]string{
+			SettingKeyPromptAuditConfig: string(raw),
+			SettingKeyRiskControl:       "false",
+		}}}
+		manager := NewConfigManager(nil, repository, nil, prefixEncryptor{})
+		require.NoError(t, manager.Reload(context.Background()))
+		repository.loadErr = errors.New("settings unavailable")
+		require.Error(t, manager.Reload(context.Background()))
+
+		public, err := manager.Public()
+		require.NoError(t, err)
+		require.Equal(t, int64(4), public.ConfigVersion)
+		require.Equal(t, "trusted snapshot", public.ChangeSummary)
+	})
 }
 
 func TestBuildNextStoragePreserveReplaceAndClearToken(t *testing.T) {
@@ -135,6 +220,18 @@ type errorSettingRepository struct{ staticSettingRepository }
 
 func (errorSettingRepository) GetMultiple(context.Context, []string) (map[string]string, error) {
 	return nil, errors.New("settings unavailable")
+}
+
+type switchableSettingRepository struct {
+	staticSettingRepository
+	loadErr error
+}
+
+func (r *switchableSettingRepository) GetMultiple(ctx context.Context, keys []string) (map[string]string, error) {
+	if r.loadErr != nil {
+		return nil, r.loadErr
+	}
+	return r.staticSettingRepository.GetMultiple(ctx, keys)
 }
 
 func TestConfigManagerStartupLoadFailureDoesNotBlockWhenBlockingNotIntended(t *testing.T) {

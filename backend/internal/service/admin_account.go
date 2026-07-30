@@ -459,6 +459,7 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 	delete(accountExtra, OllamaCloudUsageSessionExtraKey)
 	delete(accountExtra, OllamaCloudUsageAutoRefreshExtraKey)
 	delete(accountExtra, OllamaCloudUsageSnapshotExtraKey)
+	delete(accountExtra, UpstreamIdentityExtraKey)
 	account := &Account{
 		Name:        input.Name,
 		Notes:       normalizeAccountNotes(input.Notes),
@@ -683,6 +684,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		delete(normalizedExtra, OllamaCloudUsageAutoRefreshExtraKey)
 		delete(normalizedExtra, OllamaCloudUsageSnapshotExtraKey)
 		// 保留配额用量和专用服务受管字段，防止普通账号编辑意外覆盖。
+		delete(normalizedExtra, UpstreamIdentityExtraKey)
 		for _, key := range []string{
 			"quota_used",
 			"quota_daily_used",
@@ -695,6 +697,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 			OllamaCloudUsageSessionExtraKey,
 			OllamaCloudUsageAutoRefreshExtraKey,
 			OllamaCloudUsageSnapshotExtraKey,
+			UpstreamIdentityExtraKey,
 		} {
 			if v, ok := account.Extra[key]; ok {
 				normalizedExtra[key] = v
@@ -739,6 +742,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	}
 	if !reflect.DeepEqual(previousProbeIdentity, upstreamBillingProbeIdentity(account)) && account.Extra != nil {
 		delete(account.Extra, UpstreamBillingProbeExtraKey)
+		delete(account.Extra, UpstreamIdentityExtraKey)
 		if !isUpstreamBillingProbeAccount(account) {
 			delete(account.Extra, UpstreamBillingProbeEnabledExtraKey)
 		}
@@ -881,6 +885,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	delete(input.Extra, OllamaCloudUsageSessionExtraKey)
 	delete(input.Extra, OllamaCloudUsageAutoRefreshExtraKey)
 	delete(input.Extra, OllamaCloudUsageSnapshotExtraKey)
+	delete(input.Extra, UpstreamIdentityExtraKey)
 
 	if len(input.AccountIDs) == 0 && input.Filters != nil {
 		accountIDs, err := s.resolveBulkUpdateTargetIDs(ctx, input.Filters)
@@ -1022,6 +1027,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		// JSON null makes every reader treat the old snapshot as absent and lets the
 		// next enabled runner cycle probe the new upstream identity immediately.
 		repoUpdates.Extra[UpstreamBillingProbeExtraKey] = nil
+		repoUpdates.Extra[UpstreamIdentityExtraKey] = nil
 	}
 	if input.Name != "" {
 		repoUpdates.Name = &input.Name
@@ -1115,6 +1121,11 @@ func upstreamBillingProbeIdentity(account *Account) map[string]any {
 	}
 	for _, key := range []string{"api_key", "base_url", credKeyHeaderOverrideEnabled, credKeyHeaderOverrides} {
 		if value, ok := account.Credentials[key]; ok {
+			identity[key] = value
+		}
+	}
+	for _, key := range []string{"enable_tls_fingerprint", "tls_fingerprint_profile_id"} {
+		if value, ok := account.Extra[key]; ok {
 			identity[key] = value
 		}
 	}

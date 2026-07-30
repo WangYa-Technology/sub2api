@@ -188,3 +188,10 @@ func TestOllamaCloudUsageSessionRouteOmitsAuditBody(t *testing.T) {
 	require.Equal(t, "<credential-bearing body omitted>", logs[0].RequestBody)
 	require.NotContains(t, logs[0].RequestBody, "audit-canary")
 }
+
+func TestUpstreamQuotaAuditActionOverride(t *testing.T) {
+	const route = "POST /api/v1/admin/accounts/:id/upstream-quota/query"
+	if got := auditActionOverrides[route]; got != "admin.accounts.upstream_quota.query" {
+		t.Fatalf("auditActionOverrides[%q] = %q, want %q", route, got, "admin.accounts.upstream_quota.query")
+	}
+}

@@ -80,9 +80,9 @@ func TestLockAndMergeAccountProbeExtraUsesCurrentDatabaseSnapshot(t *testing.T) 
 			t.Cleanup(func() { _ = client.Close() })
 
 			mock.ExpectQuery(`(?s)`+regexp.QuoteMeta("SELECT")+`.*`+regexp.QuoteMeta("FOR NO KEY UPDATE")).
-				WithArgs(int64(27), service.PlatformOpenAI, service.AccountTypeAPIKey, `{"api_key":"sk-test"}`, nil).
-				WillReturnRows(sqlmock.NewRows([]string{"identity_unchanged", "ollama_group_unchanged", "ollama_proxy_unchanged", "enabled", "snapshot", "ollama_session", "ollama_auto", "ollama_snapshot"}).
-					AddRow(tt.identityUnchanged, false, true, tt.databaseEnabled, tt.databaseSnapshot, nil, nil, nil))
+				WithArgs(int64(27), service.PlatformOpenAI, service.AccountTypeAPIKey, `{"api_key":"sk-test"}`, nil, "null", "null").
+				WillReturnRows(sqlmock.NewRows([]string{"identity_unchanged", "ollama_group_unchanged", "ollama_proxy_unchanged", "base_url_changed", "enabled", "snapshot", "upstream_identity", "ollama_session", "ollama_auto", "ollama_snapshot"}).
+					AddRow(tt.identityUnchanged, false, true, false, tt.databaseEnabled, tt.databaseSnapshot, nil, nil, nil, nil))
 
 			account := &service.Account{
 				ID:          27,
@@ -91,7 +91,7 @@ func TestLockAndMergeAccountProbeExtraUsesCurrentDatabaseSnapshot(t *testing.T) 
 				Credentials: map[string]any{"api_key": "sk-test"},
 				Extra:       tt.inputExtra,
 			}
-			got, err := lockAndMergeAccountProbeExtra(context.Background(), client, account, nil)
+			got, _, err := lockAndMergeAccountProbeExtra(context.Background(), client, account, nil)
 			require.NoError(t, err)
 			if tt.wantSnapshot == nil {
 				require.NotContains(t, got, service.UpstreamBillingProbeExtraKey)
@@ -114,9 +114,9 @@ func TestLockAndMergeAccountProbeExtraProtectsOllamaManagedFields(t *testing.T) 
 			t.Cleanup(func() { _ = client.Close() })
 
 			mock.ExpectQuery(`(?s)`+regexp.QuoteMeta("SELECT")+`.*`+regexp.QuoteMeta("FOR NO KEY UPDATE")).
-				WithArgs(int64(29), service.PlatformAnthropic, service.AccountTypeAPIKey, `{"api_key":"key","base_url":"https://ollama.com"}`, nil).
-				WillReturnRows(sqlmock.NewRows([]string{"identity_unchanged", "ollama_group_unchanged", "ollama_proxy_unchanged", "enabled", "snapshot", "ollama_session", "ollama_auto", "ollama_snapshot"}).
-					AddRow(identityUnchanged, identityUnchanged, true, nil, nil, []byte(`"local-ciphertext"`), []byte(`true`), []byte(`{"status":"ok"}`)))
+				WithArgs(int64(29), service.PlatformAnthropic, service.AccountTypeAPIKey, `{"api_key":"key","base_url":"https://ollama.com"}`, nil, "null", "null").
+				WillReturnRows(sqlmock.NewRows([]string{"identity_unchanged", "ollama_group_unchanged", "ollama_proxy_unchanged", "base_url_changed", "enabled", "snapshot", "upstream_identity", "ollama_session", "ollama_auto", "ollama_snapshot"}).
+					AddRow(identityUnchanged, identityUnchanged, true, false, nil, nil, nil, []byte(`"local-ciphertext"`), []byte(`true`), []byte(`{"status":"ok"}`)))
 
 			account := &service.Account{
 				ID: 29, Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey,
@@ -127,7 +127,7 @@ func TestLockAndMergeAccountProbeExtraProtectsOllamaManagedFields(t *testing.T) 
 					service.OllamaCloudUsageSnapshotExtraKey:    map[string]any{"status": "forged"},
 				},
 			}
-			got, err := lockAndMergeAccountProbeExtra(context.Background(), client, account, nil)
+			got, _, err := lockAndMergeAccountProbeExtra(context.Background(), client, account, nil)
 			require.NoError(t, err)
 			if identityUnchanged {
 				require.Equal(t, "local-ciphertext", got[service.OllamaCloudUsageSessionExtraKey])
@@ -250,6 +250,9 @@ func TestUpdateCredentialsAtomicallyClearsProbeForOpenAIAPIKeyIdentityChange(t *
 	t.Cleanup(func() { _ = client.Close() })
 
 	mock.ExpectBegin()
+	mock.ExpectQuery(`(?s)`+regexp.QuoteMeta("SELECT COALESCE(credentials ->> 'base_url', '') IS DISTINCT FROM")+`.*`+regexp.QuoteMeta("FOR NO KEY UPDATE")).
+		WithArgs(int64(27), `{"api_key":"sk-new"}`).
+		WillReturnRows(sqlmock.NewRows([]string{"base_url_changed"}).AddRow(false))
 	mock.ExpectExec(`(?s)UPDATE accounts.*credentials IS DISTINCT FROM \$1::jsonb.*- 'upstream_billing_probe'`).
 		WithArgs(`{"api_key":"sk-new"}`, int64(27)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -274,9 +277,9 @@ func TestUpdateWithUpstreamBillingProbeEnabledRollsBackWhenOutboxFails(t *testin
 
 	mock.ExpectBegin()
 	mock.ExpectQuery(`(?s)`+regexp.QuoteMeta("SELECT")+`.*`+regexp.QuoteMeta("FOR NO KEY UPDATE")).
-		WithArgs(int64(27), service.PlatformOpenAI, service.AccountTypeAPIKey, `{"api_key":"sk-test"}`, nil).
-		WillReturnRows(sqlmock.NewRows([]string{"identity_unchanged", "ollama_group_unchanged", "ollama_proxy_unchanged", "enabled", "snapshot", "ollama_session", "ollama_auto", "ollama_snapshot"}).
-			AddRow(true, false, true, []byte(`true`), []byte(`{"status":"ok"}`), nil, nil, nil))
+		WithArgs(int64(27), service.PlatformOpenAI, service.AccountTypeAPIKey, `{"api_key":"sk-test"}`, nil, "null", "null").
+		WillReturnRows(sqlmock.NewRows([]string{"identity_unchanged", "ollama_group_unchanged", "ollama_proxy_unchanged", "base_url_changed", "enabled", "snapshot", "upstream_identity", "ollama_session", "ollama_auto", "ollama_snapshot"}).
+			AddRow(true, false, true, false, []byte(`true`), []byte(`{"status":"ok"}`), nil, nil, nil, nil))
 	mock.ExpectExec(`(?s)UPDATE .*accounts.*SET.*WHERE .*id.*`).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(`(?s)SELECT .* FROM "accounts" WHERE "id" = \$1`).
@@ -338,6 +341,9 @@ func TestUpdateCredentialsRollsBackWhenOutboxFails(t *testing.T) {
 	t.Cleanup(func() { _ = client.Close() })
 
 	mock.ExpectBegin()
+	mock.ExpectQuery(`(?s)`+regexp.QuoteMeta("SELECT COALESCE(credentials ->> 'base_url', '') IS DISTINCT FROM")+`.*`+regexp.QuoteMeta("FOR NO KEY UPDATE")).
+		WithArgs(int64(27), `{"api_key":"sk-new"}`).
+		WillReturnRows(sqlmock.NewRows([]string{"base_url_changed"}).AddRow(false))
 	mock.ExpectExec(`(?s)UPDATE accounts.*credentials IS DISTINCT FROM \$1::jsonb.*- 'upstream_billing_probe'`).
 		WithArgs(`{"api_key":"sk-new"}`, int64(27)).
 		WillReturnResult(sqlmock.NewResult(0, 1))

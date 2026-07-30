@@ -24,7 +24,11 @@ import type {
   UpstreamBillingProbeResult,
   UpstreamBillingProbeSettings,
   OllamaCloudUsageSettings,
-  OllamaCloudUsageState
+  OllamaCloudUsageState,
+  UpstreamBillingRatesResponse,
+  UpstreamBillingRateHistoryDays,
+  UpstreamBillingRateHistoryResponse,
+  UpstreamQuotaQueryResult
 } from '@/types'
 
 /**
@@ -120,6 +124,94 @@ export async function listWithEtag(
     etag: etagHeader,
     data: response.data
   }
+}
+
+export interface AccountUpstreamBillingRatesWithEtagResult {
+  notModified: boolean
+  etag: string | null
+  data: UpstreamBillingRatesResponse | null
+}
+
+export async function getUpstreamBillingRatesWithEtag(
+  page: number = 1,
+  pageSize: number = 20,
+  filters?: {
+    platform?: string
+    type?: string
+    status?: string
+    group?: string
+    search?: string
+    privacy_mode?: string
+    sort_by?: string
+    sort_order?: 'asc' | 'desc'
+  },
+  options?: {
+    signal?: AbortSignal
+    etag?: string | null
+  }
+): Promise<AccountUpstreamBillingRatesWithEtagResult> {
+  const headers: Record<string, string> = {}
+  if (options?.etag) {
+    headers['If-None-Match'] = options.etag
+  }
+
+  const response = await apiClient.get<UpstreamBillingRatesResponse>('/admin/accounts/upstream-billing-rates', {
+    params: {
+      page,
+      page_size: pageSize,
+      ...filters
+    },
+    headers,
+    signal: options?.signal,
+    validateStatus: (status) => (status >= 200 && status < 300) || status === 304
+  })
+
+  const etagHeader = typeof response.headers?.etag === 'string' ? response.headers.etag : null
+  if (response.status === 304) {
+    return {
+      notModified: true,
+      etag: etagHeader,
+      data: null
+    }
+  }
+
+  return {
+    notModified: false,
+    etag: etagHeader,
+    data: response.data
+  }
+}
+
+export interface AccountUpstreamBillingRateHistoryWithEtagResult {
+  notModified: boolean
+  etag: string | null
+  data: UpstreamBillingRateHistoryResponse | null
+}
+
+export async function getUpstreamBillingRateHistoryWithEtag(
+  id: number,
+  days: UpstreamBillingRateHistoryDays = 90,
+  options?: {
+    signal?: AbortSignal
+    etag?: string | null
+  }
+): Promise<AccountUpstreamBillingRateHistoryWithEtagResult> {
+  const headers: Record<string, string> = {}
+  if (options?.etag) headers['If-None-Match'] = options.etag
+  const response = await apiClient.get<UpstreamBillingRateHistoryResponse>(
+    `/admin/accounts/${id}/upstream-billing-rate-history`,
+    {
+      params: { days, limit: 500 },
+      headers,
+      signal: options?.signal,
+      validateStatus: (status) => (status >= 200 && status < 300) || status === 304
+    }
+  )
+  const etagHeader = typeof response.headers?.etag === 'string' ? response.headers.etag : null
+  if (response.status === 304) {
+    return { notModified: true, etag: etagHeader, data: null }
+  }
+  return { notModified: false, etag: etagHeader, data: response.data }
 }
 
 /**
@@ -879,7 +971,8 @@ export async function probeUpstreamBilling(id: number): Promise<UpstreamBillingP
 export async function probeUpstreamBillingBatch(accountIds: number[]): Promise<UpstreamBillingProbeResult[]> {
   const { data } = await apiClient.post<{ results: UpstreamBillingProbeResult[] }>(
     '/admin/accounts/upstream-billing-probe/batch',
-    { account_ids: accountIds }
+    { account_ids: accountIds },
+    { timeout: 120000 }
   )
   return data.results
 }
@@ -895,6 +988,19 @@ export async function updateOllamaCloudUsageSettings(
   const { data } = await apiClient.put<OllamaCloudUsageSettings>(
     '/admin/accounts/ollama-cloud-usage/settings',
     settings
+  )
+  return data
+}
+
+export async function queryUpstreamQuota(id: number): Promise<UpstreamQuotaQueryResult> {
+  const { data } = await apiClient.post<UpstreamQuotaQueryResult>(`/admin/accounts/${id}/upstream-quota/query`)
+  return data
+}
+
+export async function getUpstreamSiteLogo(key: string, signal?: AbortSignal): Promise<Blob> {
+  const { data } = await apiClient.get<Blob>(
+    `/admin/accounts/upstream-site-logos/${encodeURIComponent(key)}`,
+    { params: { v: 'cropped-1' }, responseType: 'blob', signal }
   )
   return data
 }
@@ -931,6 +1037,8 @@ export async function refreshOllamaCloudUsage(id: number): Promise<OllamaCloudUs
 export const accountsAPI = {
   list,
   listWithEtag,
+  getUpstreamBillingRatesWithEtag,
+  getUpstreamBillingRateHistoryWithEtag,
   getById,
   create,
   duplicate,
@@ -986,7 +1094,9 @@ export const accountsAPI = {
   saveOllamaCloudUsageSession,
   deleteOllamaCloudUsageSession,
   setOllamaCloudUsageAutoRefresh,
-  refreshOllamaCloudUsage
+  refreshOllamaCloudUsage,
+  queryUpstreamQuota,
+  getUpstreamSiteLogo
 }
 
 export default accountsAPI

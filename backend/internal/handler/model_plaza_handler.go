@@ -72,6 +72,7 @@ type modelPlazaGroup struct {
 // modelPlazaResponse 广场页响应。
 type modelPlazaResponse struct {
 	Description string            `json:"description"`
+	CNYPerUSD   float64           `json:"cny_per_usd"`
 	Groups      []modelPlazaGroup `json:"groups"`
 }
 
@@ -126,6 +127,7 @@ func (h *ModelPlazaHandler) Get(c *gin.Context) {
 	}
 	response.Success(c, modelPlazaResponse{
 		Description: rt.Description,
+		CNYPerUSD:   rt.CNYPerUSD,
 		Groups:      out,
 	})
 }

@@ -395,10 +395,14 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	// Available channels feature switch
 	updates[SettingKeyAvailableChannelsEnabled] = strconv.FormatBool(settings.AvailableChannelsEnabled)
 
-	// Model plaza feature switches + description
+	// Model plaza feature switches, description and recharge conversion rate
 	updates[SettingKeyModelPlazaEnabled] = strconv.FormatBool(settings.ModelPlazaEnabled)
 	updates[SettingKeyModelPlazaRequireAuth] = strconv.FormatBool(settings.ModelPlazaRequireAuth)
 	updates[SettingKeyModelPlazaDescription] = settings.ModelPlazaDescription
+	updates[SettingKeyModelPlazaCNYPerUSD] = strconv.FormatFloat(
+		parseModelPlazaCNYPerUSD(strconv.FormatFloat(settings.ModelPlazaCNYPerUSD, 'g', -1, 64)),
+		'f', -1, 64,
+	)
 
 	// Affiliate (邀请返利) feature switch
 	updates[SettingKeyAffiliateEnabled] = strconv.FormatBool(settings.AffiliateEnabled)

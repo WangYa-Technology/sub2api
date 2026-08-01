@@ -427,6 +427,7 @@ type ModelPlazaRuntime struct {
 	Enabled     bool
 	RequireAuth bool
 	Description string
+	CNYPerUSD   float64
 }
 
 // GetModelPlazaRuntime reads the model-plaza feature switches directly from the
@@ -437,6 +438,7 @@ func (s *SettingService) GetModelPlazaRuntime(ctx context.Context) ModelPlazaRun
 		SettingKeyModelPlazaEnabled,
 		SettingKeyModelPlazaRequireAuth,
 		SettingKeyModelPlazaDescription,
+		SettingKeyModelPlazaCNYPerUSD,
 	})
 	if err != nil {
 		return ModelPlazaRuntime{Enabled: false}
@@ -445,6 +447,7 @@ func (s *SettingService) GetModelPlazaRuntime(ctx context.Context) ModelPlazaRun
 		Enabled:     vals[SettingKeyModelPlazaEnabled] == "true",
 		RequireAuth: vals[SettingKeyModelPlazaRequireAuth] == "true",
 		Description: vals[SettingKeyModelPlazaDescription],
+		CNYPerUSD:   parseModelPlazaCNYPerUSD(vals[SettingKeyModelPlazaCNYPerUSD]),
 	}
 }
 

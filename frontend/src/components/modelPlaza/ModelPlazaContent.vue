@@ -33,24 +33,26 @@
       {{ t('modelPlaza.loadFailed') }}
     </div>
     <template v-else>
-      <!-- 筛选区:平台 → 分组 → 倍率 -->
+      <!-- 筛选区:平台 → 分组 → 模型名 -->
       <PlazaFilterBar
         :platforms="platforms"
         :groups="groupOptions"
-        :rates="rates"
         :platform="selectedPlatform"
         :group-id="selectedGroupId"
-        :rate="selectedRate"
         :search="searchQuery"
         @update:platform="selectedPlatform = $event"
         @update:group-id="selectedGroupId = $event"
-        @update:rate="selectedRate = $event"
         @update:search="searchQuery = $event"
       />
 
       <!-- 分组分节的模型清单(默认按生效倍率升序) -->
       <div v-if="filteredGroups.length > 0" class="space-y-5">
-        <PlazaGroupSection v-for="g in filteredGroups" :key="g.id" :group="g" />
+        <PlazaGroupSection
+          v-for="g in filteredGroups"
+          :key="g.id"
+          :group="g"
+          :cny-per-usd="response?.cny_per_usd ?? 6.8"
+        />
       </div>
       <div
         v-else
@@ -63,7 +65,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
@@ -87,7 +89,6 @@ const isAuthenticated = computed(() => authStore.isAuthenticated)
 
 const selectedPlatform = ref<string>('all')
 const selectedGroupId = ref<number | 'all'>('all')
-const selectedRate = ref<number | 'all'>('all')
 const searchQuery = ref('')
 
 const searchActive = computed(() => searchQuery.value.trim() !== '')
@@ -111,22 +112,9 @@ const groupOptions = computed(() =>
   (props.response?.groups ?? []).map((g) => ({
     id: g.id,
     name: g.name,
-    platform: g.platform,
-    rate: effectiveRate(g)
+    platform: g.platform
   }))
 )
-
-/** 全量生效倍率;当前组合下不可用的项由 FilterBar 置灰而非隐藏。 */
-const rates = computed(() =>
-  [...new Set((props.response?.groups ?? []).map(effectiveRate))].sort((a, b) => a - b)
-)
-
-/** 数据刷新后选中的倍率可能不复存在,重置为全部。 */
-watch(rates, (list) => {
-  if (selectedRate.value !== 'all' && !list.includes(selectedRate.value)) {
-    selectedRate.value = 'all'
-  }
-})
 
 const filteredGroups = computed(() => {
   let groups = props.response?.groups ?? []
@@ -135,9 +123,6 @@ const filteredGroups = computed(() => {
   }
   if (selectedGroupId.value !== 'all') {
     groups = groups.filter((g) => g.id === selectedGroupId.value)
-  }
-  if (selectedRate.value !== 'all') {
-    groups = groups.filter((g) => effectiveRate(g) === selectedRate.value)
   }
   // 模型名搜索:分组内只留命中的模型,整组无命中则隐藏该分组。
   const q = searchQuery.value.trim().toLowerCase()

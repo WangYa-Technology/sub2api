@@ -6527,6 +6527,23 @@
             </div>
 
             <div v-if="form.model_plaza_enabled">
+              <label class="input-label">
+                {{ t('admin.settings.features.modelPlaza.cnyPerUsd') }}
+                <span class="text-red-500">*</span>
+              </label>
+              <input
+                v-model.number="form.model_plaza_cny_per_usd"
+                type="number"
+                min="0.000001"
+                step="0.01"
+                class="input"
+              />
+              <p class="mt-1 text-xs text-gray-400">
+                {{ t('admin.settings.features.modelPlaza.cnyPerUsdHint') }}
+              </p>
+            </div>
+
+            <div v-if="form.model_plaza_enabled">
               <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
                 {{ t('admin.settings.features.modelPlaza.priceDescription') }}
               </label>
@@ -9066,6 +9083,7 @@ const form = reactive<SettingsForm>({
   model_plaza_enabled: false,
   model_plaza_require_auth: false,
   model_plaza_description: '',
+  model_plaza_cny_per_usd: 6.8,
   // Affiliate (邀请返利) feature switch
   affiliate_enabled: false,
   // Allow user view error requests
@@ -10645,6 +10663,7 @@ async function saveSettings() {
       model_plaza_enabled: form.model_plaza_enabled,
       model_plaza_require_auth: form.model_plaza_require_auth,
       model_plaza_description: form.model_plaza_description,
+      model_plaza_cny_per_usd: Number(form.model_plaza_cny_per_usd) || 6.8,
       // Affiliate (邀请返利) feature switch
       affiliate_enabled: form.affiliate_enabled,
       allow_user_view_error_requests: form.allow_user_view_error_requests,

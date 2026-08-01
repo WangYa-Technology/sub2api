@@ -186,9 +186,10 @@ type SystemSettings struct {
 	AvailableChannelsEnabled bool `json:"available_channels_enabled"`
 
 	// Model Plaza feature (public group/model pricing showcase)
-	ModelPlazaEnabled     bool   `json:"model_plaza_enabled"`
-	ModelPlazaRequireAuth bool   `json:"model_plaza_require_auth"`
-	ModelPlazaDescription string `json:"model_plaza_description"`
+	ModelPlazaEnabled     bool    `json:"model_plaza_enabled"`
+	ModelPlazaRequireAuth bool    `json:"model_plaza_require_auth"`
+	ModelPlazaDescription string  `json:"model_plaza_description"`
+	ModelPlazaCNYPerUSD   float64 `json:"model_plaza_cny_per_usd"`
 
 	// Claude Code version check
 	MinClaudeCodeVersion string

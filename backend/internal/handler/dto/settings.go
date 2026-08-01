@@ -14,7 +14,7 @@ type CustomMenuItem struct {
 	IconSVG    string `json:"icon_svg"`
 	URL        string `json:"url"`
 	PageSlug   string `json:"page_slug,omitempty"`
-	Visibility string `json:"visibility"` // "user" or "admin"
+	Visibility string `json:"visibility"`          // "user" or "admin"
 	OpenMode   string `json:"open_mode,omitempty"` // "iframe" or "external"
 	SortOrder  int    `json:"sort_order"`
 }
@@ -292,9 +292,10 @@ type SystemSettings struct {
 	AvailableChannelsEnabled bool `json:"available_channels_enabled"`
 
 	// Model Plaza feature (public group/model pricing showcase)
-	ModelPlazaEnabled     bool   `json:"model_plaza_enabled"`
-	ModelPlazaRequireAuth bool   `json:"model_plaza_require_auth"`
-	ModelPlazaDescription string `json:"model_plaza_description"`
+	ModelPlazaEnabled     bool    `json:"model_plaza_enabled"`
+	ModelPlazaRequireAuth bool    `json:"model_plaza_require_auth"`
+	ModelPlazaDescription string  `json:"model_plaza_description"`
+	ModelPlazaCNYPerUSD   float64 `json:"model_plaza_cny_per_usd"`
 
 	// 风控中心功能开关
 	RiskControlEnabled bool `json:"risk_control_enabled"`

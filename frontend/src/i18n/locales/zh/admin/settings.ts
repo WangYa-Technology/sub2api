@@ -37,6 +37,8 @@ export default {
           enabledHint: '开启后顶栏显示入口，页面可通过 /model-plaza 独立访问。',
           requireAuth: '需要登录才可访问',
           requireAuthHint: '开启后未登录访问将跳转登录页；关闭则公开可见，匿名访客仅展示非专属分组。',
+          cnyPerUsd: '充值倍率（人民币 / 美元）',
+          cnyPerUsdHint: '填写多少元人民币等于 1 美元，例如 6.8 表示 ¥6.8 = $1。模型广场实付价会按此倍率换算。',
           priceDescription: '价格说明（Markdown）',
           priceDescriptionHint: '展示在模型广场页面顶部，可用于说明计费规则、汇率、优惠活动等。',
         },

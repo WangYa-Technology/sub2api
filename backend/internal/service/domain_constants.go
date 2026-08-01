@@ -399,6 +399,10 @@ const (
 	// the Model Plaza page (global pricing notes, exchange rate, promotions, ...).
 	SettingKeyModelPlazaDescription = "model_plaza_description"
 
+	// SettingKeyModelPlazaCNYPerUSD stores the recharge conversion rate used by
+	// the Model Plaza: how many CNY are charged for 1 USD of channel price.
+	SettingKeyModelPlazaCNYPerUSD = "model_plaza_cny_per_usd"
+
 	// SettingKeyUpstreamBillingProbeSettings stores the global enable switch and interval
 	// for probing remote Sub2API API-key billing metadata.
 	SettingKeyUpstreamBillingProbeSettings = "upstream_billing_probe_settings"

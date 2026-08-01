@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import PlazaModelPricingTable from '../PlazaModelPricingTable.vue'
+import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import type { PlazaModel } from '@/api/modelPlaza'
 
 vi.mock('vue-i18n', async () => {
@@ -8,7 +9,8 @@ vi.mock('vue-i18n', async () => {
   return {
     ...actual,
     useI18n: () => ({
-      t: (key: string) => key
+      t: (key: string, params?: Record<string, string>) =>
+        key === 'modelPlaza.table.approxRate' ? `≈ ${params?.value} 倍` : key
     })
   }
 })
@@ -39,48 +41,51 @@ function tokenModel(overrides: Partial<PlazaModel> = {}): PlazaModel {
   }
 }
 
-function mountTable(models: PlazaModel[], rateMultiplier: number, userRateMultiplier?: number | null) {
+function mountTable(
+  models: PlazaModel[],
+  rateMultiplier: number,
+  userRateMultiplier?: number | null,
+  cnyPerUsd = 1
+) {
   return mount(PlazaModelPricingTable, {
-    props: { models, rateMultiplier, userRateMultiplier: userRateMultiplier ?? null }
+    props: { models, rateMultiplier, userRateMultiplier: userRateMultiplier ?? null, cnyPerUsd }
   })
 }
 
 describe('PlazaModelPricingTable', () => {
-  it('倍率为 1 时展示渠道单价原值($/1M),价格保底 2 位小数', () => {
+  it('倍率为 1 时用人民币展示实付价,价格保底 2 位小数', () => {
     const wrapper = mountTable([tokenModel()], 1)
     const text = wrapper.text()
-    expect(text).toContain('$3.00')
-    expect(text).toContain('$15.00')
+    expect(text).toContain('¥3.00')
+    expect(text).toContain('¥15.00')
     // 缓存写 / 读(超过 2 位小数原样保留)
-    expect(text).toContain('$3.75')
-    expect(text).toContain('$0.30')
-    // 倍率列
-    expect(text).toContain('1x')
+    expect(text).toContain('¥3.75')
+    expect(text).toContain('¥0.30')
+    // 官方价保持美元，倍率按人民币实付输出价计算
+    expect(text).toContain('$15.00')
+    expect(text).toContain('≈ 0.15 倍')
   })
 
-  it('倍率 ≠ 1 时价格列为折后实付价,官方价列保持原价', () => {
-    const wrapper = mountTable([tokenModel()], 0.5)
+  it('实付价乘充值倍率,官方价保持美元,折扣倍率按指定公式计算', () => {
+    const wrapper = mountTable([tokenModel()], 0.5, null, 0.25)
     const text = wrapper.text()
-    // 实付 = 3 × 0.5 / 15 × 0.5
-    expect(text).toContain('$1.50')
-    expect(text).toContain('$7.50')
+    // 实付人民币 = 美元渠道价 × 分组倍率 × 充值倍率
+    expect(text).toContain('¥0.375')
+    expect(text).toContain('¥1.875')
     // 官方价原值仍在(官方列不乘倍率)
     expect(text).toContain('$3.00')
     expect(text).toContain('$15.00')
-    expect(text).toContain('0.5x')
+    // (1.875 ÷ 6.8) ÷ 15 ≈ 0.02
+    expect(text).toContain('≈ 0.02 倍')
   })
 
-  it('用户专属倍率覆盖分组倍率,并划线展示原倍率', () => {
+  it('用户专属倍率覆盖分组倍率并参与人民币实付价与近似倍率计算', () => {
     const wrapper = mountTable([tokenModel()], 1, 0.8)
     const text = wrapper.text()
     // 实付按 0.8:3 × 0.8 = 2.4
-    expect(text).toContain('$2.40')
-    expect(text).toContain('$12.00')
-    // 倍率列:原倍率划线 + 专属倍率
-    const struck = wrapper.find('td .line-through')
-    expect(struck.exists()).toBe(true)
-    expect(struck.text()).toBe('1x')
-    expect(text).toContain('0.8x')
+    expect(text).toContain('¥2.40')
+    expect(text).toContain('¥12.00')
+    expect(text).toContain('≈ 0.12 倍')
   })
 
   it('模型按官方输出价从高到低排序,无官方价的排最后', () => {
@@ -120,6 +125,25 @@ describe('PlazaModelPricingTable', () => {
     expect(wrapper.findAll('tbody td')).toHaveLength(8)
   })
 
+  it('实付价格、官方价格与折扣倍率表头提供规则说明', () => {
+    const wrapper = mountTable([tokenModel()], 1)
+    const tooltips = wrapper.findAllComponents(HelpTooltip)
+
+    expect(tooltips).toHaveLength(3)
+    expect(tooltips[0].props('content')).toBe('modelPlaza.table.paidPriceHelp')
+    expect(tooltips[1].props('content')).toBe('modelPlaza.table.officialPriceHelp')
+    expect(tooltips[2].props('content')).toBe('modelPlaza.table.rateHelp')
+    expect(wrapper.get('[data-testid="paid-price-help"] button').attributes('aria-label')).toBe(
+      'modelPlaza.table.paidPriceHelpLabel'
+    )
+    expect(wrapper.get('[data-testid="official-price-help"] button').attributes('aria-label')).toBe(
+      'modelPlaza.table.officialPriceHelpLabel'
+    )
+    expect(wrapper.get('[data-testid="rate-help"] button').attributes('aria-label')).toBe(
+      'modelPlaza.table.rateHelpLabel'
+    )
+  })
+
   it('官方价包含 1h 缓存写入价;official_pricing 为 null 时官方三列显示 -', () => {
     const withOfficial = mountTable([tokenModel()], 1)
     expect(withOfficial.text()).toContain('$6.00')
@@ -131,6 +155,7 @@ describe('PlazaModelPricingTable', () => {
     expect(cells[4].text().trim()).toBe('-')
     expect(cells[5].text().trim()).toBe('-')
     expect(cells[6].text().trim()).toBe('-')
+    expect(cells[7].text().trim()).toBe('-')
   })
 
   it('per_request 模型按单次价 × 倍率展示,官方价列显示 -', () => {
@@ -152,7 +177,7 @@ describe('PlazaModelPricingTable', () => {
     const wrapper = mountTable([model], 0.5)
     const text = wrapper.text()
     // 0.04 × 0.5 = 0.02,scale=1
-    expect(text).toContain('$0.02')
+    expect(text).toContain('¥0.02')
     expect(text).toContain('modelPlaza.table.perRequest')
     // 单位后缀跟在价格后(按次 → / 次)
     expect(text).toContain('modelPlaza.table.perUnitRequest')
@@ -199,8 +224,8 @@ describe('PlazaModelPricingTable', () => {
     expect(text).toContain('≤200K')
     expect(text).toContain('>200K')
     // 折后:输入 1.5 / 3,输出 7.5 / 15
-    expect(text).toContain('$1.50')
-    expect(text).toContain('$7.50')
+    expect(text).toContain('¥1.50')
+    expect(text).toContain('¥7.50')
     expect(text).toContain('$15.00')
   })
 
@@ -245,13 +270,13 @@ describe('PlazaModelPricingTable', () => {
     const wrapper = mountTable([model], 0.1)
     const text = wrapper.text()
     expect(text).toContain('modelPlaza.table.perImage')
-    // 芯片:1K $0.001 / 2K $0.002,单位后缀内嵌(按图 → / 张)
+    // 芯片:1K ¥0.001 / 2K ¥0.002,单位后缀内嵌(按图 → / 张)
     expect(text).toContain('1K')
-    expect(text).toContain('$0.001')
+    expect(text).toContain('¥0.001')
     expect(text).toContain('2K')
-    expect(text).toContain('$0.002')
+    expect(text).toContain('¥0.002')
     expect(text).toContain('modelPlaza.table.perUnitImage')
     // 旧 bug:image_output_price × 0.1 = 0.000003 被当按次价
-    expect(text).not.toContain('$0.000003')
+    expect(text).not.toContain('¥0.000003')
   })
 })

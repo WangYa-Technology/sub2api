@@ -1,5 +1,5 @@
 <template>
-  <header class="glass sticky top-0 z-30 border-b border-gray-200/50 dark:border-dark-700/50">
+  <header class="glass sticky top-0 z-30 shrink-0 border-b border-gray-200/50 dark:border-dark-700/50">
     <div class="flex h-16 items-center justify-between gap-2 px-2 sm:px-4 md:px-6">
       <!-- Left: Mobile Menu Toggle + Page Title -->
       <div class="flex shrink-0 items-center gap-2 sm:gap-4">
@@ -42,10 +42,13 @@
         <router-link
           v-if="user && modelPlazaEnabled"
           :to="{ path: '/model-plaza', query: { embedded: '1' } }"
-          class="hidden items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white sm:flex"
+          class="model-plaza-entry group hidden sm:flex"
+          :class="{ 'model-plaza-entry-active': route.path === '/model-plaza' }"
         >
-          <Icon name="grid" size="sm" />
-          <span class="hidden sm:inline">{{ t('nav.modelPlaza') }}</span>
+          <span class="model-plaza-entry-icon" aria-hidden="true">
+            <Icon name="grid" size="sm" :stroke-width="2" />
+          </span>
+          <span>{{ t('nav.modelPlaza') }}</span>
         </router-link>
 
         <!-- Language Switcher -->
@@ -382,6 +385,28 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.model-plaza-entry {
+  @apply h-9 items-center gap-2 rounded-lg border border-primary-200/80 bg-primary-50/70 px-2.5 text-sm font-semibold text-primary-700 shadow-sm;
+  @apply transition-colors duration-150 hover:border-primary-300 hover:bg-primary-100 hover:text-primary-800;
+  @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40;
+  @apply dark:border-primary-500/25 dark:bg-primary-500/10 dark:text-primary-300 dark:hover:border-primary-400/40 dark:hover:bg-primary-500/15 dark:hover:text-primary-200;
+}
+
+.model-plaza-entry-icon {
+  @apply flex h-6 w-6 items-center justify-center rounded-md bg-primary-600 text-white shadow-sm;
+  @apply transition-colors duration-150 group-hover:bg-primary-700;
+  @apply dark:bg-primary-400/15 dark:text-primary-300 dark:ring-1 dark:ring-inset dark:ring-primary-400/25 dark:group-hover:bg-primary-400/25;
+}
+
+.model-plaza-entry-active {
+  @apply border-primary-400 bg-primary-100 text-primary-800 ring-1 ring-primary-300/50;
+  @apply dark:border-primary-400/50 dark:bg-primary-500/20 dark:text-primary-200 dark:ring-primary-400/20;
+}
+
+.model-plaza-entry-active .model-plaza-entry-icon {
+  @apply bg-primary-700 dark:bg-primary-400/30 dark:text-primary-200;
+}
+
 .dropdown-enter-active,
 .dropdown-leave-active {
   transition: all 0.2s ease;

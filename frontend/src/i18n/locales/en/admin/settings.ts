@@ -37,6 +37,8 @@ export default {
           enabledHint: 'When enabled, an entry appears in the header and the page is reachable at /model-plaza.',
           requireAuth: 'Require sign-in to access',
           requireAuthHint: 'When on, anonymous visitors are redirected to the login page; when off, the page is public and anonymous visitors only see non-exclusive groups.',
+          cnyPerUsd: 'Recharge rate (CNY / USD)',
+          cnyPerUsdHint: 'Enter how many CNY equal USD 1. For example, 6.8 means ¥6.8 = $1. Model Plaza paid prices use this conversion.',
           priceDescription: 'Pricing notes (Markdown)',
           priceDescriptionHint: 'Rendered at the top of the plaza page. Use it for billing rules, exchange rates, promotions, etc.',
         },

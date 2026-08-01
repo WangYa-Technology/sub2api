@@ -10,7 +10,12 @@
  * Uses toPrecision(10) then strips trailing zeros to avoid IEEE 754 display noise.
  * `minFractionDigits` pads the result back up to a minimum number of decimals.
  */
-export function formatScaled(value: number | null, scale: number, minFractionDigits = 0): string {
+export function formatScaled(
+  value: number | null,
+  scale: number,
+  minFractionDigits = 0,
+  currencySymbol = '$'
+): string {
   if (value == null) return '-'
   let s = (value * scale).toPrecision(10).replace(/\.?0+$/, '')
   if (minFractionDigits > 0 && !s.includes('e')) {
@@ -20,5 +25,5 @@ export function formatScaled(value: number | null, scale: number, minFractionDig
       s = (dot === -1 ? `${s}.` : s) + '0'.repeat(minFractionDigits - digits)
     }
   }
-  return `$${s}`
+  return `${currencySymbol}${s}`
 }

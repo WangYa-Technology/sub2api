@@ -46,6 +46,8 @@ export interface ModelPlazaGroup {
 export interface ModelPlazaResponse {
   /** 管理员配置的全局价格说明（Markdown）。 */
   description: string
+  /** 充值换算倍率：多少人民币 = 1 美元。 */
+  cny_per_usd: number
   groups: ModelPlazaGroup[]
 }
 

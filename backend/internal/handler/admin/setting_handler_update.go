@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"math"
 	"net/http"
 	"reflect"
 	"strings"
@@ -314,9 +315,10 @@ type UpdateSettingsRequest struct {
 	AvailableChannelsEnabled *bool `json:"available_channels_enabled"`
 
 	// Model Plaza feature switches + description
-	ModelPlazaEnabled     *bool   `json:"model_plaza_enabled"`
-	ModelPlazaRequireAuth *bool   `json:"model_plaza_require_auth"`
-	ModelPlazaDescription *string `json:"model_plaza_description"`
+	ModelPlazaEnabled     *bool    `json:"model_plaza_enabled"`
+	ModelPlazaRequireAuth *bool    `json:"model_plaza_require_auth"`
+	ModelPlazaDescription *string  `json:"model_plaza_description"`
+	ModelPlazaCNYPerUSD   *float64 `json:"model_plaza_cny_per_usd"`
 
 	// Affiliate (邀请返利) feature switch
 	AffiliateEnabled *bool `json:"affiliate_enabled"`
@@ -1325,6 +1327,10 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		response.BadRequest(c, "cyber_session_block_ttl_seconds must be > 0")
 		return
 	}
+	if req.ModelPlazaCNYPerUSD != nil && (*req.ModelPlazaCNYPerUSD <= 0 || math.IsNaN(*req.ModelPlazaCNYPerUSD) || math.IsInf(*req.ModelPlazaCNYPerUSD, 0)) {
+		response.BadRequest(c, "model_plaza_cny_per_usd must be a finite number greater than 0")
+		return
+	}
 
 	settings := &service.SystemSettings{
 		// 系统全局 platform quota 默认值（整体替换语义）
@@ -1708,6 +1714,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 				return *req.ModelPlazaDescription
 			}
 			return previousSettings.ModelPlazaDescription
+		}(),
+		ModelPlazaCNYPerUSD: func() float64 {
+			if req.ModelPlazaCNYPerUSD != nil {
+				return *req.ModelPlazaCNYPerUSD
+			}
+			return previousSettings.ModelPlazaCNYPerUSD
 		}(),
 		AffiliateEnabled: func() bool {
 			if req.AffiliateEnabled != nil {
@@ -2107,6 +2119,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		ModelPlazaEnabled:     updatedSettings.ModelPlazaEnabled,
 		ModelPlazaRequireAuth: updatedSettings.ModelPlazaRequireAuth,
 		ModelPlazaDescription: updatedSettings.ModelPlazaDescription,
+		ModelPlazaCNYPerUSD:   updatedSettings.ModelPlazaCNYPerUSD,
 
 		AffiliateEnabled: updatedSettings.AffiliateEnabled,
 

@@ -52,6 +52,7 @@
         :platform="group.platform"
         :rate-multiplier="group.rate_multiplier"
         :user-rate-multiplier="group.user_rate_multiplier ?? null"
+        :cny-per-usd="cnyPerUsd"
       />
       <p v-else class="py-4 text-center text-sm text-gray-400 dark:text-dark-500">
         {{ t('modelPlaza.detail.noModels') }}
@@ -74,6 +75,7 @@ import { useAppStore } from '@/stores/app'
 
 const props = defineProps<{
   group: ModelPlazaGroup
+  cnyPerUsd: number
 }>()
 
 const { t } = useI18n()

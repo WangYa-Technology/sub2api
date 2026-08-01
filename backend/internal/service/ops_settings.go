@@ -39,7 +39,7 @@ func (s *OpsService) GetEmailNotificationConfig(ctx context.Context) (*OpsEmailN
 		return nil, err
 	}
 
-	cfg := &OpsEmailNotificationConfig{}
+	cfg := defaultOpsEmailNotificationConfig()
 	if err := json.Unmarshal([]byte(raw), cfg); err != nil {
 		// Corrupted JSON should not break ops UI; fall back to defaults.
 		return defaultCfg, nil
@@ -69,6 +69,8 @@ func (s *OpsService) UpdateEmailNotificationConfig(ctx context.Context, req *Ops
 		if req.Alert.Recipients != nil {
 			cfg.Alert.Recipients = req.Alert.Recipients
 		}
+		cfg.Alert.AccountErrorEnabled = req.Alert.AccountErrorEnabled
+		cfg.Alert.ProxyExpiryEnabled = req.Alert.ProxyExpiryEnabled
 		cfg.Alert.MinSeverity = strings.TrimSpace(req.Alert.MinSeverity)
 		cfg.Alert.RateLimitPerHour = req.Alert.RateLimitPerHour
 		cfg.Alert.BatchingWindowSeconds = req.Alert.BatchingWindowSeconds
@@ -112,6 +114,8 @@ func defaultOpsEmailNotificationConfig() *OpsEmailNotificationConfig {
 		Alert: OpsEmailAlertConfig{
 			Enabled:               true,
 			Recipients:            []string{},
+			AccountErrorEnabled:   true,
+			ProxyExpiryEnabled:    true,
 			MinSeverity:           "",
 			RateLimitPerHour:      0,
 			BatchingWindowSeconds: 0,

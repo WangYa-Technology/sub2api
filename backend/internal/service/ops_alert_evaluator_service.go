@@ -22,6 +22,7 @@ const (
 	opsAlertEvaluatorLeaderLockKey   = "ops:alert:evaluator:leader"
 	opsAlertEvaluatorLeaderLockTTL   = 90 * time.Second
 	opsAlertEvaluatorSkipLogInterval = 1 * time.Minute
+	opsProxyExpiryReminderWindow     = 3 * 24 * time.Hour
 )
 
 var opsAlertEvaluatorReleaseScript = redis.NewScript(`
@@ -46,10 +47,13 @@ type OpsAlertEvaluatorService struct {
 	stopOnce  sync.Once
 	wg        sync.WaitGroup
 
-	mu         sync.Mutex
-	ruleStates map[int64]*opsAlertRuleState
+	mu                        sync.Mutex
+	ruleStates                map[int64]*opsAlertRuleState
+	accountNotificationStates map[int64]string
+	proxyNotificationStates   map[int64]string
 
 	emailLimiter *slidingWindowLimiter
+	weComLimiter *slidingWindowLimiter
 
 	skipLogMu sync.Mutex
 	skipLogAt time.Time
@@ -71,15 +75,18 @@ func NewOpsAlertEvaluatorService(
 	proxyRepo ProxyRepository,
 ) *OpsAlertEvaluatorService {
 	return &OpsAlertEvaluatorService{
-		opsService:   opsService,
-		opsRepo:      opsRepo,
-		emailService: emailService,
-		proxyRepo:    proxyRepo,
-		redisClient:  redisClient,
-		cfg:          cfg,
-		instanceID:   uuid.NewString(),
-		ruleStates:   map[int64]*opsAlertRuleState{},
-		emailLimiter: newSlidingWindowLimiter(0, time.Hour),
+		opsService:                opsService,
+		opsRepo:                   opsRepo,
+		emailService:              emailService,
+		proxyRepo:                 proxyRepo,
+		redisClient:               redisClient,
+		cfg:                       cfg,
+		instanceID:                uuid.NewString(),
+		ruleStates:                map[int64]*opsAlertRuleState{},
+		accountNotificationStates: map[int64]string{},
+		proxyNotificationStates:   map[int64]string{},
+		emailLimiter:              newSlidingWindowLimiter(0, time.Hour),
+		weComLimiter:              newSlidingWindowLimiter(0, time.Hour),
 	}
 }
 
@@ -199,6 +206,7 @@ func (s *OpsAlertEvaluatorService) evaluateOnce(interval time.Duration) {
 	eventsCreated := 0
 	eventsResolved := 0
 	emailsSent := 0
+	weComSent := 0
 
 	now := time.Now().UTC()
 	safeEnd := now.Truncate(time.Minute)
@@ -245,6 +253,9 @@ func (s *OpsAlertEvaluatorService) evaluateOnce(interval time.Duration) {
 
 		if breachedNow && consecutive >= required {
 			if activeEvent != nil {
+				if s.maybeSendAlertWeCom(ctx, runtimeCfg, rule, activeEvent) {
+					weComSent++
+				}
 				continue
 			}
 
@@ -295,6 +306,9 @@ func (s *OpsAlertEvaluatorService) evaluateOnce(interval time.Duration) {
 				if s.maybeSendAlertEmail(ctx, runtimeCfg, rule, created) {
 					emailsSent++
 				}
+				if s.maybeSendAlertWeCom(ctx, runtimeCfg, rule, created) {
+					weComSent++
+				}
 			}
 			continue
 		}
@@ -306,12 +320,491 @@ func (s *OpsAlertEvaluatorService) evaluateOnce(interval time.Duration) {
 				logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] resolve event failed (event=%d): %v", activeEvent.ID, err)
 			} else {
 				eventsResolved++
+				activeEvent.Status = OpsAlertStatusResolved
+				activeEvent.ResolvedAt = &resolvedAt
+				if s.maybeSendAlertWeCom(ctx, runtimeCfg, rule, activeEvent) {
+					weComSent++
+				}
+			}
+		} else if latestEvent, err := s.opsRepo.GetLatestAlertEvent(ctx, rule.ID); err == nil && latestEvent != nil &&
+			(latestEvent.Status == OpsAlertStatusResolved || latestEvent.Status == OpsAlertStatusManualResolved) {
+			// A failed recovery delivery is retried on later evaluator cycles. The
+			// persistent delivery key prevents duplicate recovery messages.
+			if s.maybeSendAlertWeCom(ctx, runtimeCfg, rule, latestEvent) {
+				weComSent++
 			}
 		}
 	}
 
-	result := truncateString(fmt.Sprintf("rules=%d enabled=%d evaluated=%d created=%d resolved=%d emails_sent=%d", rulesTotal, rulesEnabled, rulesEvaluated, eventsCreated, eventsResolved, emailsSent), 2048)
+	resourceEmailsSent := s.evaluateResourceNotifications(ctx, now)
+	resourceWeComSent := s.evaluateWeComResourceNotifications(ctx, now)
+	result := truncateString(fmt.Sprintf("rules=%d enabled=%d evaluated=%d created=%d resolved=%d emails_sent=%d wecom_sent=%d resource_emails_sent=%d resource_wecom_sent=%d", rulesTotal, rulesEnabled, rulesEvaluated, eventsCreated, eventsResolved, emailsSent, weComSent, resourceEmailsSent, resourceWeComSent), 2048)
 	s.recordHeartbeatSuccess(runAt, time.Since(startedAt), result)
+}
+
+func (s *OpsAlertEvaluatorService) evaluateResourceNotifications(ctx context.Context, now time.Time) int {
+	if s == nil || s.opsService == nil || s.emailService == nil || s.emailService.notificationEmailService == nil {
+		return 0
+	}
+	emailCfg, err := s.opsService.GetEmailNotificationConfig(ctx)
+	if err != nil || emailCfg == nil {
+		return 0
+	}
+	if !emailCfg.Alert.Enabled || len(emailCfg.Alert.Recipients) == 0 {
+		s.clearAccountNotificationStates()
+		s.clearProxyNotificationStates()
+		return 0
+	}
+
+	s.emailLimiter.SetLimit(emailCfg.Alert.RateLimitPerHour)
+	sent := 0
+	if emailCfg.Alert.AccountErrorEnabled {
+		sent += s.evaluateAccountStatusNotifications(ctx, now, emailCfg.Alert.Recipients, emailCfg.Alert.MinSeverity)
+	} else {
+		s.clearAccountNotificationStates()
+	}
+	if emailCfg.Alert.ProxyExpiryEnabled {
+		sent += s.evaluateProxyExpiryNotifications(ctx, now, emailCfg.Alert.Recipients, emailCfg.Alert.MinSeverity)
+	} else {
+		s.clearProxyNotificationStates()
+	}
+	return sent
+}
+
+func (s *OpsAlertEvaluatorService) evaluateWeComResourceNotifications(ctx context.Context, now time.Time) int {
+	if s == nil || s.opsService == nil || s.opsService.weComNotifier == nil || s.opsService.settingRepo == nil {
+		return 0
+	}
+	cfg, err := s.opsService.GetWeComNotificationConfig(ctx)
+	if err != nil || cfg == nil || !cfg.Enabled || strings.TrimSpace(cfg.WebhookURL) == "" {
+		return 0
+	}
+	s.weComLimiter.SetLimit(cfg.RateLimitPerHour)
+	sent := 0
+	if cfg.AccountErrorEnabled {
+		sent += s.evaluateAccountStatusWeComNotifications(ctx, now, cfg)
+	}
+	if cfg.ProxyExpiryEnabled {
+		sent += s.evaluateProxyExpiryWeComNotifications(ctx, now, cfg)
+	}
+	return sent
+}
+
+type opsWeComDeliveryResult struct {
+	Sent      bool
+	Delivered bool
+}
+
+func (s *OpsAlertEvaluatorService) sendOpsWeComOnce(ctx context.Context, cfg *OpsWeComNotificationConfig, deliveryKey, content string) opsWeComDeliveryResult {
+	if s == nil || s.opsService == nil || s.opsService.weComNotifier == nil || cfg == nil || strings.TrimSpace(deliveryKey) == "" {
+		return opsWeComDeliveryResult{}
+	}
+	delivered, err := s.opsService.weComDeliveryExists(ctx, deliveryKey)
+	if err != nil {
+		logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] check WeCom delivery failed (delivery=%s): %v", notificationEmailHash(deliveryKey), err)
+		return opsWeComDeliveryResult{}
+	}
+	if delivered {
+		return opsWeComDeliveryResult{Delivered: true}
+	}
+	if !s.weComLimiter.Allow(time.Now().UTC()) {
+		return opsWeComDeliveryResult{}
+	}
+	if err := s.opsService.weComNotifier.SendMarkdown(ctx, cfg.WebhookURL, content); err != nil {
+		logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] send WeCom notification failed (delivery=%s): %v", notificationEmailHash(deliveryKey), err)
+		return opsWeComDeliveryResult{}
+	}
+	if err := s.opsService.markWeComDelivered(ctx, deliveryKey); err != nil {
+		logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] persist WeCom delivery failed (delivery=%s): %v", notificationEmailHash(deliveryKey), err)
+		return opsWeComDeliveryResult{Sent: true}
+	}
+	return opsWeComDeliveryResult{Sent: true, Delivered: true}
+}
+
+func (s *OpsAlertEvaluatorService) evaluateAccountStatusWeComNotifications(ctx context.Context, now time.Time, cfg *OpsWeComNotificationConfig) int {
+	availability, err := s.opsService.GetAccountAvailability(ctx, "", nil)
+	if err != nil || availability == nil {
+		return 0
+	}
+	sent := 0
+	for id, account := range availability.Accounts {
+		candidate := buildOpsAccountNotificationCandidate(account, now)
+		if candidate == nil || id <= 0 {
+			continue
+		}
+		severity := "P1"
+		if candidate.status == "error" {
+			severity = "P0"
+		}
+		if !shouldSendOpsAlertByMinSeverity(cfg.MinSeverity, severity) {
+			continue
+		}
+		reminderKey := opsAccountIncidentReminderKey(candidate.fingerprint, account.UpdatedAt)
+		deliveryKey := opsWeComDeliveryKey("account_status", strconv.FormatInt(id, 10), reminderKey)
+		result := s.sendOpsWeComOnce(ctx, cfg, deliveryKey, buildOpsAccountWeComMarkdown(id, account, candidate, severity, now))
+		if result.Sent {
+			sent++
+		}
+	}
+	return sent
+}
+
+func (s *OpsAlertEvaluatorService) evaluateProxyExpiryWeComNotifications(ctx context.Context, now time.Time, cfg *OpsWeComNotificationConfig) int {
+	if s.proxyRepo == nil || !shouldSendOpsAlertByMinSeverity(cfg.MinSeverity, "P1") {
+		return 0
+	}
+	proxies, err := s.proxyRepo.ListActiveWithAccountCount(ctx)
+	if err != nil {
+		return 0
+	}
+	sent := 0
+	for i := range proxies {
+		proxy := &proxies[i]
+		if proxy.ID <= 0 || !isProxyInOpsExpiryReminderWindow(proxy.ExpiresAt, now) {
+			continue
+		}
+		reminderKey := proxy.ExpiresAt.UTC().Format(time.RFC3339Nano)
+		deliveryKey := opsWeComDeliveryKey("proxy_expiry", strconv.FormatInt(proxy.ID, 10), reminderKey)
+		result := s.sendOpsWeComOnce(ctx, cfg, deliveryKey, buildOpsProxyExpiryWeComMarkdown(proxy, now))
+		if result.Sent {
+			sent++
+		}
+	}
+	return sent
+}
+
+func buildOpsAccountWeComMarkdown(id int64, account *AccountAvailability, candidate *opsAccountNotificationCandidate, severity string, now time.Time) string {
+	status := "错误"
+	if candidate != nil && candidate.status == "temporarily_unschedulable" {
+		status = "临时不可调度"
+	}
+	return fmt.Sprintf(
+		"## Sub2API 账号异常通知\n> 级别：**%s**\n> 账号：%s（ID: %d）\n> 平台：%s\n> 账号类型：%s\n> 状态：%s\n> 错误信息：%s\n> 临时不可调度至：%s\n> 检测时间：%s",
+		sanitizeOpsWeComField(severity),
+		sanitizeOpsWeComField(account.AccountName),
+		id,
+		sanitizeOpsWeComField(account.Platform),
+		sanitizeOpsWeComField(account.AccountType),
+		status,
+		sanitizeOpsWeComField(candidate.message),
+		sanitizeOpsWeComField(candidate.until),
+		now.UTC().Format(time.RFC3339),
+	)
+}
+
+func buildOpsProxyExpiryWeComMarkdown(proxy *ProxyWithAccountCount, now time.Time) string {
+	if proxy == nil {
+		return "## Sub2API IP 到期提醒\n> IP：-"
+	}
+	expiresAt := "-"
+	remaining := "-"
+	if proxy.ExpiresAt != nil {
+		expiresAt = proxy.ExpiresAt.UTC().Format(time.RFC3339)
+		remaining = formatOpsRemainingTime(proxy.ExpiresAt.Sub(now))
+	}
+	return fmt.Sprintf(
+		"## Sub2API IP 到期提醒\n> 级别：**P1**\n> IP：%s（ID: %d）\n> 剩余时间：%s\n> 到期时间：%s\n> IP 内账号数量：%d\n> 检测时间：%s",
+		sanitizeOpsWeComField(proxy.Name),
+		proxy.ID,
+		sanitizeOpsWeComField(remaining),
+		expiresAt,
+		proxy.AccountCount,
+		now.UTC().Format(time.RFC3339),
+	)
+}
+
+func sanitizeOpsWeComField(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "-"
+	}
+	value = strings.NewReplacer("\r", " ", "\n", " ", "<", "‹", ">", "›").Replace(value)
+	return truncateUTF8Bytes(value, 1000)
+}
+
+type opsAccountNotificationCandidate struct {
+	status      string
+	message     string
+	until       string
+	fingerprint string
+}
+
+func buildOpsAccountNotificationCandidate(account *AccountAvailability, now time.Time) *opsAccountNotificationCandidate {
+	if account == nil {
+		return nil
+	}
+	status := ""
+	message := strings.TrimSpace(account.ErrorMessage)
+	until := "-"
+	if account.HasError {
+		status = "error"
+	} else if account.TempUnschedulableUntil != nil && now.Before(*account.TempUnschedulableUntil) {
+		status = "temporarily_unschedulable"
+		if reason := strings.TrimSpace(account.TempUnschedulableReason); reason != "" {
+			message = reason
+		}
+		until = account.TempUnschedulableUntil.UTC().Format(time.RFC3339)
+	}
+	if status == "" {
+		return nil
+	}
+	if message == "" {
+		message = "-"
+	}
+	fingerprint := strings.Join([]string{status, message}, "\x00")
+	return &opsAccountNotificationCandidate{status: status, message: message, until: until, fingerprint: fingerprint}
+}
+
+func (s *OpsAlertEvaluatorService) evaluateAccountStatusNotifications(ctx context.Context, now time.Time, recipients []string, minSeverity string) int {
+	availability, err := s.opsService.GetAccountAvailability(ctx, "", nil)
+	if err != nil || availability == nil {
+		return 0
+	}
+	live := make(map[int64]string)
+	sent := 0
+	for id, account := range availability.Accounts {
+		candidate := buildOpsAccountNotificationCandidate(account, now)
+		if candidate == nil || id <= 0 {
+			continue
+		}
+		live[id] = candidate.fingerprint
+		if s.accountNotificationState(id) == candidate.fingerprint {
+			continue
+		}
+		severity := "P1"
+		if candidate.status == "error" {
+			severity = "P0"
+		}
+		if !shouldSendOpsAlertEmailByMinSeverity(minSeverity, severity) {
+			continue
+		}
+
+		reminderKey := opsAccountIncidentReminderKey(candidate.fingerprint, account.UpdatedAt)
+		input := NotificationEmailSendInput{
+			Event:       NotificationEmailEventOpsAccountStatusAlert,
+			SourceType:  "ops_account_status",
+			SourceID:    strconv.FormatInt(id, 10),
+			ReminderKey: reminderKey,
+			Variables: map[string]string{
+				"account_id":               strconv.FormatInt(id, 10),
+				"account_name":             strings.TrimSpace(account.AccountName),
+				"platform":                 strings.TrimSpace(account.Platform),
+				"account_type":             strings.TrimSpace(account.AccountType),
+				"account_status":           candidate.status,
+				"account_error_message":    candidate.message,
+				"temp_unschedulable_until": candidate.until,
+				"triggered_at":             now.UTC().Format(time.RFC3339),
+			},
+		}
+		if s.sendOpsResourceNotification(ctx, recipients, input) {
+			s.setAccountNotificationState(id, candidate.fingerprint)
+			sent++
+		}
+	}
+	s.pruneAccountNotificationStates(live)
+	return sent
+}
+
+func opsAccountIncidentReminderKey(fingerprint string, updatedAt time.Time) string {
+	identity := fingerprint
+	if !updatedAt.IsZero() {
+		identity += "\x00" + updatedAt.UTC().Format(time.RFC3339Nano)
+	}
+	return notificationEmailHash(identity)
+}
+
+func (s *OpsAlertEvaluatorService) evaluateProxyExpiryNotifications(ctx context.Context, now time.Time, recipients []string, minSeverity string) int {
+	if s.proxyRepo == nil {
+		return 0
+	}
+	if !shouldSendOpsAlertEmailByMinSeverity(minSeverity, "P1") {
+		return 0
+	}
+	proxies, err := s.proxyRepo.ListActiveWithAccountCount(ctx)
+	if err != nil {
+		return 0
+	}
+	live := make(map[int64]string)
+	sent := 0
+	for i := range proxies {
+		proxy := &proxies[i]
+		if proxy.ID <= 0 || !isProxyInOpsExpiryReminderWindow(proxy.ExpiresAt, now) {
+			continue
+		}
+		fingerprint := proxy.ExpiresAt.UTC().Format(time.RFC3339Nano)
+		live[proxy.ID] = fingerprint
+		if s.proxyNotificationState(proxy.ID) == fingerprint {
+			continue
+		}
+
+		input := NotificationEmailSendInput{
+			Event:       NotificationEmailEventOpsProxyExpiryReminder,
+			SourceType:  "ops_proxy_expiry",
+			SourceID:    strconv.FormatInt(proxy.ID, 10),
+			ReminderKey: fingerprint,
+			Variables: map[string]string{
+				"proxy_id":             strconv.FormatInt(proxy.ID, 10),
+				"proxy_name":           strings.TrimSpace(proxy.Name),
+				"proxy_expires_at":     proxy.ExpiresAt.UTC().Format(time.RFC3339),
+				"proxy_remaining_time": formatOpsRemainingTime(proxy.ExpiresAt.Sub(now)),
+				"proxy_account_count":  strconv.FormatInt(proxy.AccountCount, 10),
+				"triggered_at":         now.UTC().Format(time.RFC3339),
+			},
+		}
+		if s.sendOpsResourceNotification(ctx, recipients, input) {
+			s.setProxyNotificationState(proxy.ID, fingerprint)
+			sent++
+		}
+	}
+	s.pruneProxyNotificationStates(live)
+	return sent
+}
+
+func isProxyInOpsExpiryReminderWindow(expiresAt *time.Time, now time.Time) bool {
+	return expiresAt != nil && expiresAt.After(now) && !expiresAt.After(now.Add(opsProxyExpiryReminderWindow))
+}
+
+func formatOpsRemainingTime(remaining time.Duration) string {
+	if remaining <= 0 {
+		return "0m"
+	}
+	totalMinutes := int64(math.Ceil(remaining.Minutes()))
+	days := totalMinutes / (24 * 60)
+	hours := (totalMinutes % (24 * 60)) / 60
+	minutes := totalMinutes % 60
+	parts := make([]string, 0, 3)
+	if days > 0 {
+		parts = append(parts, fmt.Sprintf("%dd", days))
+	}
+	if hours > 0 {
+		parts = append(parts, fmt.Sprintf("%dh", hours))
+	}
+	if minutes > 0 || len(parts) == 0 {
+		parts = append(parts, fmt.Sprintf("%dm", minutes))
+	}
+	return strings.Join(parts, " ")
+}
+
+func (s *OpsAlertEvaluatorService) sendOpsResourceNotification(ctx context.Context, recipients []string, input NotificationEmailSendInput) bool {
+	allDelivered := true
+	attempted := false
+	notificationService := s.emailService.notificationEmailService
+	for _, recipient := range normalizeEmails(recipients) {
+		deliveryKey := notificationEmailDeliveryKey(input.Event, input.SourceType, input.SourceID, recipient, input.ReminderKey)
+		legacyDeliveryKey := legacyNotificationEmailDeliveryKey(input.Event, input.SourceType, input.SourceID, recipient, input.ReminderKey)
+		alreadyDelivered, err := notificationService.deliveryExists(ctx, deliveryKey, legacyDeliveryKey)
+		if err != nil {
+			allDelivered = false
+			continue
+		}
+		if alreadyDelivered {
+			attempted = true
+			continue
+		}
+		if !s.emailLimiter.Allow(time.Now().UTC()) {
+			allDelivered = false
+			continue
+		}
+		attempted = true
+		recipientInput := input
+		recipientInput.RecipientEmail = recipient
+		recipientInput.RecipientName = emailRecipientName(recipient)
+		recipientInput.Locale = notificationService.ResolveRecipientLocale(ctx, 0, recipient)
+		recipientInput.Variables = localizedOpsResourceVariables(input.Event, recipientInput.Locale, input.Variables)
+		if err := notificationService.Send(ctx, recipientInput); err != nil {
+			allDelivered = false
+			logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] resource notification failed (event=%s recipient=%s): %v", input.Event, notificationEmailHash(recipient), err)
+		}
+	}
+	return attempted && allDelivered
+}
+
+func localizedOpsResourceVariables(event, locale string, variables map[string]string) map[string]string {
+	localized := make(map[string]string, len(variables))
+	for key, value := range variables {
+		localized[key] = value
+	}
+	if !strings.HasPrefix(strings.ToLower(locale), "zh") {
+		return localized
+	}
+	switch event {
+	case NotificationEmailEventOpsAccountStatusAlert:
+		switch localized["account_status"] {
+		case "error":
+			localized["account_status"] = "错误"
+		case "temporarily_unschedulable":
+			localized["account_status"] = "临时不可调度"
+		}
+	case NotificationEmailEventOpsProxyExpiryReminder:
+		localized["proxy_remaining_time"] = strings.NewReplacer(
+			"d", " 天",
+			"h", " 小时",
+			"m", " 分钟",
+		).Replace(localized["proxy_remaining_time"])
+	}
+	return localized
+}
+
+func (s *OpsAlertEvaluatorService) accountNotificationState(id int64) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.accountNotificationStates[id]
+}
+
+func (s *OpsAlertEvaluatorService) setAccountNotificationState(id int64, state string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.accountNotificationStates == nil {
+		s.accountNotificationStates = map[int64]string{}
+	}
+	s.accountNotificationStates[id] = state
+}
+
+func (s *OpsAlertEvaluatorService) pruneAccountNotificationStates(live map[int64]string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id := range s.accountNotificationStates {
+		if _, ok := live[id]; !ok {
+			delete(s.accountNotificationStates, id)
+		}
+	}
+}
+
+func (s *OpsAlertEvaluatorService) clearAccountNotificationStates() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.accountNotificationStates = map[int64]string{}
+}
+
+func (s *OpsAlertEvaluatorService) proxyNotificationState(id int64) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.proxyNotificationStates[id]
+}
+
+func (s *OpsAlertEvaluatorService) setProxyNotificationState(id int64, state string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.proxyNotificationStates == nil {
+		s.proxyNotificationStates = map[int64]string{}
+	}
+	s.proxyNotificationStates[id] = state
+}
+
+func (s *OpsAlertEvaluatorService) pruneProxyNotificationStates(live map[int64]string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id := range s.proxyNotificationStates {
+		if _, ok := live[id]; !ok {
+			delete(s.proxyNotificationStates, id)
+		}
+	}
+}
+
+func (s *OpsAlertEvaluatorService) clearProxyNotificationStates() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.proxyNotificationStates = map[int64]string{}
 }
 
 func (s *OpsAlertEvaluatorService) pruneRuleStates(rules []*OpsAlertRule) {
@@ -745,6 +1238,80 @@ func (s *OpsAlertEvaluatorService) maybeSendAlertEmail(ctx context.Context, runt
 		_ = s.opsRepo.UpdateAlertEventEmailSent(context.Background(), event.ID, true)
 	}
 	return anySent
+}
+
+func (s *OpsAlertEvaluatorService) maybeSendAlertWeCom(ctx context.Context, runtimeCfg *OpsAlertRuntimeSettings, rule *OpsAlertRule, event *OpsAlertEvent) bool {
+	if s == nil || s.opsService == nil || s.opsService.weComNotifier == nil || s.opsRepo == nil || event == nil || rule == nil || !rule.NotifyWeCom {
+		return false
+	}
+	isResolved := event.Status == OpsAlertStatusResolved || event.Status == OpsAlertStatusManualResolved
+	if !isResolved && event.WeComSent {
+		return false
+	}
+	cfg, err := s.opsService.GetWeComNotificationConfig(ctx)
+	if err != nil || cfg == nil || !cfg.Enabled || strings.TrimSpace(cfg.WebhookURL) == "" {
+		return false
+	}
+	if isResolved && !cfg.IncludeResolvedAlerts {
+		return false
+	}
+	if !shouldSendOpsAlertByMinSeverity(cfg.MinSeverity, rule.Severity) {
+		return false
+	}
+	if runtimeCfg != nil && runtimeCfg.Silencing.Enabled && isOpsAlertSilenced(time.Now().UTC(), rule, event, runtimeCfg.Silencing) {
+		return false
+	}
+
+	phase := "firing"
+	if isResolved {
+		phase = "resolved"
+	}
+	s.weComLimiter.SetLimit(cfg.RateLimitPerHour)
+	deliveryKey := opsWeComDeliveryKey("alert", phase, strconv.FormatInt(event.ID, 10))
+	result := s.sendOpsWeComOnce(ctx, cfg, deliveryKey, buildOpsAlertWeComMarkdown(rule, event))
+	if result.Delivered && !event.WeComSent {
+		if err := s.opsRepo.UpdateAlertEventWeComSent(context.Background(), event.ID, true); err != nil {
+			logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] update WeCom delivery status failed (event=%d): %v", event.ID, err)
+		} else {
+			event.WeComSent = true
+		}
+	}
+	return result.Sent
+}
+
+func shouldSendOpsAlertByMinSeverity(minSeverity, severity string) bool {
+	minSeverity = strings.ToUpper(strings.TrimSpace(minSeverity))
+	severity = strings.ToUpper(strings.TrimSpace(severity))
+	if minSeverity == "" {
+		return true
+	}
+	rank := map[string]int{"P0": 0, "P1": 1, "P2": 2, "P3": 3}
+	minRank, minOK := rank[minSeverity]
+	severityRank, severityOK := rank[severity]
+	return minOK && severityOK && severityRank <= minRank
+}
+
+func buildOpsAlertWeComMarkdown(rule *OpsAlertRule, event *OpsAlertEvent) string {
+	status := "触发"
+	if event != nil && (event.Status == OpsAlertStatusResolved || event.Status == OpsAlertStatusManualResolved) {
+		status = "恢复"
+	}
+	name, severity, description := "-", "-", "-"
+	if rule != nil {
+		name = sanitizeOpsWeComField(rule.Name)
+		severity = sanitizeOpsWeComField(rule.Severity)
+	}
+	if event != nil {
+		description = sanitizeOpsWeComField(event.Description)
+	}
+	content := fmt.Sprintf("## Sub2API 运维预警%s\n> 级别：**%s**\n> 规则：%s\n> 详情：%s", status, severity, name, description)
+	if event != nil && !event.FiredAt.IsZero() {
+		content += "\n> 触发时间：" + event.FiredAt.UTC().Format(time.RFC3339)
+	}
+	if event != nil && event.ResolvedAt != nil {
+		content += "\n> 恢复时间：" + event.ResolvedAt.UTC().Format(time.RFC3339)
+	}
+	return content
 }
 
 func opsAlertEmailVariables(rule *OpsAlertRule, event *OpsAlertEvent) map[string]string {

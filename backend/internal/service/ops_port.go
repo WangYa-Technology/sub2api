@@ -49,6 +49,7 @@ type OpsRepository interface {
 	CreateAlertEvent(ctx context.Context, event *OpsAlertEvent) (*OpsAlertEvent, error)
 	UpdateAlertEventStatus(ctx context.Context, eventID int64, status string, resolvedAt *time.Time) error
 	UpdateAlertEventEmailSent(ctx context.Context, eventID int64, emailSent bool) error
+	UpdateAlertEventWeComSent(ctx context.Context, eventID int64, weComSent bool) error
 
 	// Alert silences
 	CreateAlertSilence(ctx context.Context, input *OpsAlertSilence) (*OpsAlertSilence, error)

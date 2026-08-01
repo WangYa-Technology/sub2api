@@ -194,15 +194,17 @@ func TestParseOpsQueryMode(t *testing.T) {
 
 func TestOpsAlertRuleValidation(t *testing.T) {
 	raw := map[string]json.RawMessage{
-		"name":        json.RawMessage(`"High error rate"`),
-		"metric_type": json.RawMessage(`"error_rate"`),
-		"operator":    json.RawMessage(`">"`),
-		"threshold":   json.RawMessage(`90`),
+		"name":         json.RawMessage(`"High error rate"`),
+		"metric_type":  json.RawMessage(`"error_rate"`),
+		"operator":     json.RawMessage(`">"`),
+		"threshold":    json.RawMessage(`90`),
+		"notify_wecom": json.RawMessage(`true`),
 	}
 
 	validated, err := validateOpsAlertRulePayload(raw)
 	require.NoError(t, err)
 	require.Equal(t, "High error rate", validated.Name)
+	require.True(t, validated.NotifyWeCom)
 
 	_, err = validateOpsAlertRulePayload(map[string]json.RawMessage{})
 	require.Error(t, err)

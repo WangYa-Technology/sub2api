@@ -145,6 +145,8 @@ func TestNotificationEmailAdditionalEventsAreListedAndPreviewable(t *testing.T) 
 		{NotificationEmailEventContentModerationDisabled, "violation_count"},
 		{NotificationEmailEventCyberPolicyNotice, "upstream_message"},
 		{NotificationEmailEventOpsAlert, "rule_name"},
+		{NotificationEmailEventOpsAccountStatusAlert, "account_error_message"},
+		{NotificationEmailEventOpsProxyExpiryReminder, "proxy_account_count"},
 		{NotificationEmailEventOpsScheduledReport, "report_html"},
 	}
 

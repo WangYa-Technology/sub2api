@@ -121,6 +121,8 @@ func (s *OpsService) GetAccountAvailabilityStats(ctx context.Context, platformFi
 			AccountID:   acc.ID,
 			AccountName: acc.Name,
 			Platform:    acc.Platform,
+			AccountType: acc.Type,
+			UpdatedAt:   acc.UpdatedAt,
 			GroupID:     displayGroupID,
 			GroupName:   displayGroupName,
 			Status:      acc.Status,
@@ -130,7 +132,8 @@ func (s *OpsService) GetAccountAvailabilityStats(ctx context.Context, platformFi
 			IsOverloaded:  isOverloaded,
 			HasError:      hasError,
 
-			ErrorMessage: acc.ErrorMessage,
+			ErrorMessage:            acc.ErrorMessage,
+			TempUnschedulableReason: acc.TempUnschedulableReason,
 		}
 
 		if isRateLimited && acc.RateLimitResetAt != nil {

@@ -165,6 +165,10 @@ func (m *opsRepoMock) UpdateAlertEventEmailSent(ctx context.Context, eventID int
 	return nil
 }
 
+func (m *opsRepoMock) UpdateAlertEventWeComSent(ctx context.Context, eventID int64, weComSent bool) error {
+	return nil
+}
+
 func (m *opsRepoMock) CreateAlertSilence(ctx context.Context, input *OpsAlertSilence) (*OpsAlertSilence, error) {
 	return input, nil
 }

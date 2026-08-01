@@ -231,6 +231,18 @@ onMounted(() => {
             {{ t('admin.ops.email.rateLimitPerHour') }}:
             <span class="ml-1 font-medium text-gray-900 dark:text-white">{{ config.alert.rate_limit_per_hour }}</span>
           </div>
+          <div class="text-xs text-gray-600 dark:text-gray-300">
+            {{ t('admin.ops.settings.accountErrorNotification') }}:
+            <span class="ml-1 font-medium text-gray-900 dark:text-white">
+              {{ config.alert.account_error_enabled ? t('common.enabled') : t('common.disabled') }}
+            </span>
+          </div>
+          <div class="text-xs text-gray-600 dark:text-gray-300">
+            {{ t('admin.ops.settings.proxyExpiryNotification') }}:
+            <span class="ml-1 font-medium text-gray-900 dark:text-white">
+              {{ config.alert.proxy_expiry_enabled ? t('common.enabled') : t('common.disabled') }}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -328,6 +340,22 @@ onMounted(() => {
             <label class="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
               <input v-model="draft.alert.include_resolved_alerts" type="checkbox" class="h-4 w-4 rounded border-gray-300" />
               <span>{{ draft.alert.include_resolved_alerts ? t('common.enabled') : t('common.disabled') }}</span>
+            </label>
+          </div>
+
+          <div>
+            <div class="mb-1 text-xs font-medium text-gray-600 dark:text-gray-300">{{ t('admin.ops.settings.accountErrorNotification') }}</div>
+            <label class="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+              <input v-model="draft.alert.account_error_enabled" type="checkbox" class="h-4 w-4 rounded border-gray-300" />
+              <span>{{ draft.alert.account_error_enabled ? t('common.enabled') : t('common.disabled') }}</span>
+            </label>
+          </div>
+
+          <div>
+            <div class="mb-1 text-xs font-medium text-gray-600 dark:text-gray-300">{{ t('admin.ops.settings.proxyExpiryNotification') }}</div>
+            <label class="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+              <input v-model="draft.alert.proxy_expiry_enabled" type="checkbox" class="h-4 w-4 rounded border-gray-300" />
+              <span>{{ draft.alert.proxy_expiry_enabled ? t('common.enabled') : t('common.disabled') }}</span>
             </label>
           </div>
         </div>

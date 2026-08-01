@@ -32,6 +32,8 @@ const (
 	NotificationEmailEventContentModerationDisabled   = "content_moderation.account_disabled"
 	NotificationEmailEventCyberPolicyNotice           = "content_moderation.cyber_policy_notice"
 	NotificationEmailEventOpsAlert                    = "ops.alert"
+	NotificationEmailEventOpsAccountStatusAlert       = "ops.account_status_alert"
+	NotificationEmailEventOpsProxyExpiryReminder      = "ops.proxy_expiry_reminder"
 	NotificationEmailEventOpsScheduledReport          = "ops.scheduled_report"
 
 	notificationEmailTemplateKeyPrefix    = "notification_email_template:"
@@ -942,6 +944,7 @@ func notificationEmailSampleVariables(locale string) map[string]string {
 			"report_end_time":     "2026-07-19T01:00:26Z",
 			"report_html":         "<h2>日报</h2><p>请求量：2,374</p>",
 		}
+		addNotificationEmailResourceSampleVariables(variables, true)
 		addNotificationEmailOpsSummarySampleVariables(variables)
 		return variables
 	}
@@ -990,8 +993,28 @@ func notificationEmailSampleVariables(locale string) map[string]string {
 		"report_end_time":     "2026-07-19T01:00:26Z",
 		"report_html":         "<h2>Daily summary</h2><p>Requests: 2,374</p>",
 	}
+	addNotificationEmailResourceSampleVariables(variables, false)
 	addNotificationEmailOpsSummarySampleVariables(variables)
 	return variables
+}
+
+func addNotificationEmailResourceSampleVariables(variables map[string]string, chinese bool) {
+	variables["account_type"] = "oauth"
+	variables["temp_unschedulable_until"] = "2026-05-20 12:30:00"
+	variables["proxy_id"] = "2001"
+	variables["proxy_expires_at"] = "2026-05-23 12:00:00"
+	variables["proxy_account_count"] = "12"
+	if chinese {
+		variables["account_status"] = "临时不可调度"
+		variables["account_error_message"] = "上游认证失败，账号暂时停止调度"
+		variables["proxy_name"] = "香港出口 IP 01"
+		variables["proxy_remaining_time"] = "2 天 23 小时"
+		return
+	}
+	variables["account_status"] = "Temporarily unschedulable"
+	variables["account_error_message"] = "Upstream authentication failed; scheduling is temporarily paused."
+	variables["proxy_name"] = "Hong Kong Egress IP 01"
+	variables["proxy_remaining_time"] = "2d 23h"
 }
 
 func addNotificationEmailOpsSummarySampleVariables(variables map[string]string) {
@@ -1033,6 +1056,8 @@ var notificationEmailEventOrder = []string{
 	NotificationEmailEventContentModerationDisabled,
 	NotificationEmailEventCyberPolicyNotice,
 	NotificationEmailEventOpsAlert,
+	NotificationEmailEventOpsAccountStatusAlert,
+	NotificationEmailEventOpsProxyExpiryReminder,
 	NotificationEmailEventOpsScheduledReport,
 }
 
@@ -1137,6 +1162,24 @@ var notificationEmailEventDefinitions = map[string]NotificationEmailEventInfo{
 		Optional:    false,
 		Placeholders: append(append([]string{}, notificationEmailCommonPlaceholders...),
 			"rule_name", "severity", "alert_status", "metric_type", "operator", "metric_value", "threshold_value", "triggered_at", "alert_description"),
+	},
+	NotificationEmailEventOpsAccountStatusAlert: {
+		Event:       NotificationEmailEventOpsAccountStatusAlert,
+		Label:       "Ops account status alert",
+		Description: "Sent to operations recipients when an upstream account enters an error or temporary-unschedulable state.",
+		Category:    "ops",
+		Optional:    false,
+		Placeholders: append(append([]string{}, notificationEmailCommonPlaceholders...),
+			"account_id", "account_name", "platform", "account_type", "account_status", "account_error_message", "temp_unschedulable_until", "triggered_at"),
+	},
+	NotificationEmailEventOpsProxyExpiryReminder: {
+		Event:       NotificationEmailEventOpsProxyExpiryReminder,
+		Label:       "Ops proxy expiry reminder",
+		Description: "Sent to operations recipients when an active proxy enters the three-day expiry window.",
+		Category:    "ops",
+		Optional:    false,
+		Placeholders: append(append([]string{}, notificationEmailCommonPlaceholders...),
+			"proxy_id", "proxy_name", "proxy_expires_at", "proxy_remaining_time", "proxy_account_count", "triggered_at"),
 	},
 	NotificationEmailEventOpsScheduledReport: {
 		Event:       NotificationEmailEventOpsScheduledReport,
@@ -1424,6 +1467,60 @@ var notificationEmailOfficialTemplates = map[string]map[string]notificationEmail
 <p><strong>指标</strong>：{{metric_type}} {{operator}} {{metric_value}}（阈值 {{threshold_value}}）</p>
 <p><strong>触发时间</strong>：{{triggered_at}}</p>
 <p><strong>说明</strong>：{{alert_description}}</p>`),
+		},
+	},
+	NotificationEmailEventOpsAccountStatusAlert: {
+		notificationEmailDefaultLocale: {
+			Subject: "[Ops Alert] Account abnormal: {{account_name}}",
+			HTML: notificationEmailCard("#dc2626", "Account status alert", `
+<p>An upstream account entered an abnormal scheduling state.</p>
+<table style="width:100%;border-collapse:collapse;table-layout:fixed;">
+  <tr><td style="width:152px;vertical-align:top;">Account</td><td style="overflow-wrap:anywhere;word-break:break-word;">{{account_name}} (#{{account_id}})</td></tr>
+  <tr><td style="vertical-align:top;">Platform / type</td><td style="overflow-wrap:anywhere;word-break:break-word;">{{platform}} / {{account_type}}</td></tr>
+  <tr><td style="vertical-align:top;">Status</td><td style="overflow-wrap:anywhere;word-break:break-word;">{{account_status}}</td></tr>
+  <tr><td style="vertical-align:top;">Error</td><td style="overflow-wrap:anywhere;word-break:break-all;white-space:pre-wrap;">{{account_error_message}}</td></tr>
+  <tr><td style="vertical-align:top;">Unschedulable until</td><td>{{temp_unschedulable_until}}</td></tr>
+  <tr><td style="vertical-align:top;">Detected at</td><td>{{triggered_at}}</td></tr>
+</table>`),
+		},
+		notificationEmailLocaleChinese: {
+			Subject: "[运维告警] 账号异常：{{account_name}}",
+			HTML: notificationEmailCard("#dc2626", "账号异常通知", `
+<p>检测到上游账号进入异常调度状态。</p>
+<table style="width:100%;border-collapse:collapse;table-layout:fixed;">
+  <tr><td style="width:128px;vertical-align:top;">账号名称</td><td style="overflow-wrap:anywhere;word-break:break-word;">{{account_name}}（#{{account_id}}）</td></tr>
+  <tr><td style="vertical-align:top;">平台 / 类型</td><td style="overflow-wrap:anywhere;word-break:break-word;">{{platform}} / {{account_type}}</td></tr>
+  <tr><td style="vertical-align:top;">账号状态</td><td style="overflow-wrap:anywhere;word-break:break-word;">{{account_status}}</td></tr>
+  <tr><td style="vertical-align:top;">错误信息</td><td style="overflow-wrap:anywhere;word-break:break-all;white-space:pre-wrap;">{{account_error_message}}</td></tr>
+  <tr><td style="vertical-align:top;">暂停调度至</td><td>{{temp_unschedulable_until}}</td></tr>
+  <tr><td style="vertical-align:top;">检测时间</td><td>{{triggered_at}}</td></tr>
+</table>`),
+		},
+	},
+	NotificationEmailEventOpsProxyExpiryReminder: {
+		notificationEmailDefaultLocale: {
+			Subject: "[Ops Reminder] Proxy expiring soon: {{proxy_name}}",
+			HTML: notificationEmailCard("#d97706", "Proxy expiry reminder", `
+<p>An active proxy has entered the three-day expiry window.</p>
+<table style="width:100%;border-collapse:collapse;table-layout:fixed;">
+  <tr><td style="width:132px;vertical-align:top;">Proxy</td><td style="overflow-wrap:anywhere;word-break:break-word;">{{proxy_name}} (#{{proxy_id}})</td></tr>
+  <tr><td style="vertical-align:top;">Time remaining</td><td>{{proxy_remaining_time}}</td></tr>
+  <tr><td style="vertical-align:top;">Expires at</td><td>{{proxy_expires_at}}</td></tr>
+  <tr><td style="vertical-align:top;">Bound accounts</td><td>{{proxy_account_count}}</td></tr>
+  <tr><td style="vertical-align:top;">Detected at</td><td>{{triggered_at}}</td></tr>
+</table>`),
+		},
+		notificationEmailLocaleChinese: {
+			Subject: "[运维提醒] IP 即将到期：{{proxy_name}}",
+			HTML: notificationEmailCard("#d97706", "IP 到期提醒", `
+<p>检测到活跃 IP 已进入到期前 3 天提醒窗口。</p>
+<table style="width:100%;border-collapse:collapse;table-layout:fixed;">
+  <tr><td style="width:112px;vertical-align:top;">IP 名称</td><td style="overflow-wrap:anywhere;word-break:break-word;">{{proxy_name}}（#{{proxy_id}}）</td></tr>
+  <tr><td style="vertical-align:top;">剩余时间</td><td>{{proxy_remaining_time}}</td></tr>
+  <tr><td style="vertical-align:top;">到期时间</td><td>{{proxy_expires_at}}</td></tr>
+  <tr><td style="vertical-align:top;">绑定账号数</td><td>{{proxy_account_count}}</td></tr>
+  <tr><td style="vertical-align:top;">检测时间</td><td>{{triggered_at}}</td></tr>
+</table>`),
 		},
 	},
 	NotificationEmailEventOpsScheduledReport: {

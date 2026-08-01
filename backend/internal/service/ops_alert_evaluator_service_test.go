@@ -106,6 +106,159 @@ func TestCountAccountsByCondition(t *testing.T) {
 	})
 }
 
+func TestBuildOpsAccountNotificationCandidate(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.August, 1, 8, 0, 0, 0, time.UTC)
+	until := now.Add(30 * time.Minute)
+
+	t.Run("healthy account is ignored", func(t *testing.T) {
+		t.Parallel()
+		require.Nil(t, buildOpsAccountNotificationCandidate(&AccountAvailability{}, now))
+	})
+
+	t.Run("error account includes its error message", func(t *testing.T) {
+		t.Parallel()
+		candidate := buildOpsAccountNotificationCandidate(&AccountAvailability{
+			HasError:     true,
+			ErrorMessage: "credential refresh failed",
+		}, now)
+		require.NotNil(t, candidate)
+		require.Equal(t, "error", candidate.status)
+		require.Equal(t, "credential refresh failed", candidate.message)
+		require.Equal(t, "-", candidate.until)
+	})
+
+	t.Run("temporary unschedulable account prefers its runtime reason", func(t *testing.T) {
+		t.Parallel()
+		candidate := buildOpsAccountNotificationCandidate(&AccountAvailability{
+			ErrorMessage:            "stale error",
+			TempUnschedulableUntil:  &until,
+			TempUnschedulableReason: "upstream transport timeout",
+		}, now)
+		require.NotNil(t, candidate)
+		require.Equal(t, "temporarily_unschedulable", candidate.status)
+		require.Equal(t, "upstream transport timeout", candidate.message)
+		require.Equal(t, until.Format(time.RFC3339), candidate.until)
+	})
+
+	t.Run("a changed reason produces a new incident fingerprint", func(t *testing.T) {
+		t.Parallel()
+		first := buildOpsAccountNotificationCandidate(&AccountAvailability{
+			HasError:     true,
+			ErrorMessage: "first error",
+		}, now)
+		second := buildOpsAccountNotificationCandidate(&AccountAvailability{
+			HasError:     true,
+			ErrorMessage: "second error",
+		}, now)
+		require.NotEqual(t, first.fingerprint, second.fingerprint)
+	})
+
+	t.Run("extending the same temporary incident does not duplicate it", func(t *testing.T) {
+		t.Parallel()
+		firstUntil := now.Add(10 * time.Minute)
+		secondUntil := now.Add(20 * time.Minute)
+		first := buildOpsAccountNotificationCandidate(&AccountAvailability{
+			TempUnschedulableUntil:  &firstUntil,
+			TempUnschedulableReason: "transport timeout",
+		}, now)
+		second := buildOpsAccountNotificationCandidate(&AccountAvailability{
+			TempUnschedulableUntil:  &secondUntil,
+			TempUnschedulableReason: "transport timeout",
+		}, now)
+		require.Equal(t, first.fingerprint, second.fingerprint)
+	})
+}
+
+func TestOpsResourceNotificationStateAndProxyWindow(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.August, 1, 8, 0, 0, 0, time.UTC)
+	svc := &OpsAlertEvaluatorService{}
+	svc.setAccountNotificationState(42, "incident")
+	require.Equal(t, "incident", svc.accountNotificationState(42))
+	svc.pruneAccountNotificationStates(map[int64]string{})
+	require.Empty(t, svc.accountNotificationState(42), "recovery must clear the incident state")
+	firstIncidentAt := now.Add(-2 * time.Hour)
+	secondIncidentAt := now.Add(-time.Hour)
+	require.NotEqual(t,
+		opsAccountIncidentReminderKey("same error", firstIncidentAt),
+		opsAccountIncidentReminderKey("same error", secondIncidentAt),
+		"the same error after recovery must be deliverable as a new incident",
+	)
+
+	inside := now.Add(72 * time.Hour)
+	outside := now.Add(72*time.Hour + time.Second)
+	expired := now.Add(-time.Second)
+	require.True(t, isProxyInOpsExpiryReminderWindow(&inside, now))
+	require.False(t, isProxyInOpsExpiryReminderWindow(&outside, now))
+	require.False(t, isProxyInOpsExpiryReminderWindow(&expired, now))
+	require.False(t, isProxyInOpsExpiryReminderWindow(nil, now))
+	require.Equal(t, "2d 3h 5m", formatOpsRemainingTime(51*time.Hour+5*time.Minute))
+	require.Equal(t, "临时不可调度", localizedOpsResourceVariables(
+		NotificationEmailEventOpsAccountStatusAlert,
+		"zh",
+		map[string]string{"account_status": "temporarily_unschedulable"},
+	)["account_status"])
+	require.Equal(t, "2 天 3 小时 5 分钟", localizedOpsResourceVariables(
+		NotificationEmailEventOpsProxyExpiryReminder,
+		"zh-CN",
+		map[string]string{"proxy_remaining_time": "2d 3h 5m"},
+	)["proxy_remaining_time"])
+}
+
+func TestOpsResourceNotificationDisabledClearsIncidentState(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	repo := newNotificationEmailMemorySettingRepo()
+	require.NoError(t, repo.Set(ctx, SettingKeyOpsEmailNotificationConfig, `{
+		"alert": {
+			"enabled": false,
+			"recipients": ["ops@example.com"]
+		}
+	}`))
+	emailService := NewEmailService(repo, nil)
+	_ = NewNotificationEmailService(repo, emailService)
+	svc := &OpsAlertEvaluatorService{
+		opsService:   &OpsService{settingRepo: repo},
+		emailService: emailService,
+	}
+	svc.setAccountNotificationState(42, "account-incident")
+	svc.setProxyNotificationState(7, "proxy-expiry")
+
+	require.Zero(t, svc.evaluateResourceNotifications(ctx, time.Now().UTC()))
+	require.Empty(t, svc.accountNotificationState(42))
+	require.Empty(t, svc.proxyNotificationState(7))
+}
+
+func TestSendOpsResourceNotificationSkipsDeliveredRecipientsBeforeRateLimit(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	repo := newNotificationEmailMemorySettingRepo()
+	emailService := NewEmailService(repo, nil)
+	notificationService := NewNotificationEmailService(repo, emailService)
+	svc := &OpsAlertEvaluatorService{
+		emailService: emailService,
+		emailLimiter: newSlidingWindowLimiter(1, time.Hour),
+	}
+	input := NotificationEmailSendInput{
+		Event:       NotificationEmailEventOpsAccountStatusAlert,
+		SourceType:  "ops_account_status",
+		SourceID:    "42",
+		ReminderKey: "incident-1",
+	}
+	recipient := "ops@example.com"
+	deliveryKey := notificationEmailDeliveryKey(input.Event, input.SourceType, input.SourceID, recipient, input.ReminderKey)
+	require.NoError(t, repo.Set(ctx, deliveryKey, time.Now().UTC().Format(time.RFC3339Nano)))
+
+	require.True(t, svc.sendOpsResourceNotification(ctx, []string{recipient}, input))
+	require.True(t, svc.emailLimiter.Allow(time.Now().UTC()), "a deduplicated delivery must not consume the limiter")
+	require.NotNil(t, notificationService)
+}
+
 // TestComputeRuleMetric_AccountTempUnscheduledCount verifies the new
 // account_temp_unscheduled_count metric counts accounts currently in the
 // temp-unscheduled window and ignores those whose window has expired or

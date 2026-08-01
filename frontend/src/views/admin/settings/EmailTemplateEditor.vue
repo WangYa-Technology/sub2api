@@ -263,6 +263,15 @@ const fallbackPlaceholders = [
   "{{account_id}}",
   "{{account_name}}",
   "{{platform}}",
+  "{{account_type}}",
+  "{{account_status}}",
+  "{{account_error_message}}",
+  "{{temp_unschedulable_until}}",
+  "{{proxy_id}}",
+  "{{proxy_name}}",
+  "{{proxy_expires_at}}",
+  "{{proxy_remaining_time}}",
+  "{{proxy_account_count}}",
   "{{quota_dimension}}",
   "{{quota_used}}",
   "{{quota_limit}}",
@@ -395,6 +404,16 @@ const eventDisplayMeta: Record<string, EventDisplayMeta> = {
     timing: "运维监控规则触发告警并满足邮件通知配置时发送给运维收件人。",
     categoryLabel: "运维",
   },
+  "ops.account_status_alert": {
+    label: "运维账号异常通知",
+    timing: "运维监控检测到上游账号进入错误或临时不可调度状态时发送；异常恢复后再次发生会重新通知。",
+    categoryLabel: "运维",
+  },
+  "ops.proxy_expiry_reminder": {
+    label: "运维 IP 到期提醒",
+    timing: "运维监控检测到活跃 IP 进入到期前 3 天窗口时发送一次；到期时间变更后会按新时间重新提醒。",
+    categoryLabel: "运维",
+  },
   "ops.scheduled_report": {
     label: "运维定时报表",
     timing: "运维日报、周报、错误摘要或账号健康报表到达配置的发送时间时发送；日报和周报的完整指标均可在模板中编辑。",
@@ -456,6 +475,16 @@ const eventDisplayMetaEn: Record<string, EventDisplayMeta> = {
   "ops.alert": {
     label: "Ops Alert",
     timing: "Sent to ops recipients when an ops monitoring rule fires and email notification settings allow it.",
+    categoryLabel: "Ops",
+  },
+  "ops.account_status_alert": {
+    label: "Ops Account Status Alert",
+    timing: "Sent when ops monitoring detects an upstream account entering an error or temporary-unschedulable state. A new incident after recovery triggers another notification.",
+    categoryLabel: "Ops",
+  },
+  "ops.proxy_expiry_reminder": {
+    label: "Ops Proxy Expiry Reminder",
+    timing: "Sent once when ops monitoring detects an active proxy entering its three-day expiry window. Changing the expiry time creates a new reminder.",
     categoryLabel: "Ops",
   },
   "ops.scheduled_report": {

@@ -8,6 +8,7 @@ const dir = dirname(fileURLToPath(import.meta.url))
 const layoutSource = readFileSync(resolve(dir, '../AppLayout.vue'), 'utf8')
 const headerSource = readFileSync(resolve(dir, '../AppHeader.vue'), 'utf8')
 const globalStyleSource = readFileSync(resolve(dir, '../../../style.css'), 'utf8')
+const settingsSource = readFileSync(resolve(dir, '../../../views/admin/SettingsView.vue'), 'utf8')
 
 describe('AppLayout scroll ownership', () => {
   it('keeps document scrolling out of the application shell', () => {
@@ -22,6 +23,14 @@ describe('AppLayout scroll ownership', () => {
     expect(layoutSource.indexOf('<AppHeader />')).toBeLessThan(
       layoutSource.indexOf('<main class="app-main-scroll')
     )
+  })
+
+  it('anchors settings tabs to the main scroll container without a second header offset', () => {
+    const settingsTabsRule = settingsSource.match(/\.settings-tabs-shell\s*\{[\s\S]*?\n\}/)
+
+    expect(settingsTabsRule).not.toBeNull()
+    expect(settingsTabsRule?.[0]).toContain('top: 0;')
+    expect(settingsTabsRule?.[0]).not.toContain('top: 4.75rem;')
   })
 
   it('does not rely on the root scrollbar gutter workaround', () => {

@@ -37,8 +37,10 @@ func TestOpenAIGatewayService_APIKeyPassthrough_StripsInvalidInputItemIDs(t *tes
 		"input":[
 			{"type":"message","id":"item_bad_message","role":"assistant","content":[{"type":"output_text","text":"hello"}]},
 			{"type":"function_call","id":"item_bad_call","call_id":"call_123","name":"exec_command","arguments":"{}"},
+			{"type":"reasoning","id":"item_bad_reasoning","summary":[]},
 			{"type":"message","id":"msg_valid","role":"user","content":[{"type":"input_text","text":"continue"}]},
 			{"type":"function_call","id":"fc_valid","call_id":"call_456","name":"apply_patch","arguments":"{}"},
+			{"type":"reasoning","id":"rs_valid","summary":[]},
 			{"type":"function_call_output","id":"item_output","call_id":"call_123","output":"done"},
 			{"type":"web_search_call","id":"item_unconstrained"}
 		]
@@ -56,11 +58,15 @@ func TestOpenAIGatewayService_APIKeyPassthrough_StripsInvalidInputItemIDs(t *tes
 	require.Equal(t, "call_123", gjson.GetBytes(forwarded, "input.1.call_id").String())
 	require.Equal(t, "exec_command", gjson.GetBytes(forwarded, "input.1.name").String())
 	require.Equal(t, "{}", gjson.GetBytes(forwarded, "input.1.arguments").String())
-	require.Equal(t, "msg_valid", gjson.GetBytes(forwarded, "input.2.id").String())
-	require.Equal(t, "fc_valid", gjson.GetBytes(forwarded, "input.3.id").String())
-	require.Equal(t, "item_output", gjson.GetBytes(forwarded, "input.4.id").String())
-	require.Equal(t, "call_123", gjson.GetBytes(forwarded, "input.4.call_id").String())
-	require.Equal(t, "item_unconstrained", gjson.GetBytes(forwarded, "input.5.id").String())
+	require.False(t, gjson.GetBytes(forwarded, "input.2.id").Exists())
+	require.Equal(t, "reasoning", gjson.GetBytes(forwarded, "input.2.type").String())
+	require.True(t, gjson.GetBytes(forwarded, "input.2.summary").IsArray())
+	require.Equal(t, "msg_valid", gjson.GetBytes(forwarded, "input.3.id").String())
+	require.Equal(t, "fc_valid", gjson.GetBytes(forwarded, "input.4.id").String())
+	require.Equal(t, "rs_valid", gjson.GetBytes(forwarded, "input.5.id").String())
+	require.Equal(t, "item_output", gjson.GetBytes(forwarded, "input.6.id").String())
+	require.Equal(t, "call_123", gjson.GetBytes(forwarded, "input.6.call_id").String())
+	require.Equal(t, "item_unconstrained", gjson.GetBytes(forwarded, "input.7.id").String())
 }
 
 func TestSanitizeOpenAIResponsesInputItemIDs_AllocationGrowthIsLinear(t *testing.T) {

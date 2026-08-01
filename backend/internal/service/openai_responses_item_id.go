@@ -9,7 +9,7 @@ import (
 )
 
 // Invalid replayed IDs are removed rather than rewritten because a fabricated
-// msg/fc ID may point at a different upstream object.
+// msg/fc/rs ID may point at a different upstream object.
 func shouldStripOpenAIResponsesInputItemID(itemType, id string) bool {
 	if id == "" {
 		return false
@@ -19,6 +19,9 @@ func shouldStripOpenAIResponsesInputItemID(itemType, id string) bool {
 	}
 	if isCodexToolCallInputType(itemType) {
 		return !strings.HasPrefix(id, "fc")
+	}
+	if itemType == "reasoning" {
+		return !strings.HasPrefix(id, "rs")
 	}
 	return false
 }

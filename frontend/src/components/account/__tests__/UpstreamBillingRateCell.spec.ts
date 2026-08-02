@@ -83,6 +83,7 @@ describe('UpstreamBillingRateCell', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+    document.body.innerHTML = ''
   })
 
   it('recomputes the current effective rate and keeps the icon-only probe action', async () => {
@@ -724,6 +725,11 @@ describe('UpstreamBillingRateCell', () => {
     })
     await wrapper.get('[data-testid="upstream-billing-probe"]').trigger('click')
     expect(wrapper.emitted('probe')).toHaveLength(1)
+
+    // 探测已放宽到全部 API-key 平台：grok API-key 账号同样可探测。
+    await wrapper.setProps({ account: makeAccount({ platform: 'grok' }) })
+    await wrapper.get('[data-testid="upstream-billing-probe"]').trigger('click')
+    expect(wrapper.emitted('probe')).toHaveLength(2)
 
     await wrapper.setProps({ account: makeAccount({ type: 'oauth' }) })
     expect(wrapper.findAll('button')).toHaveLength(0)

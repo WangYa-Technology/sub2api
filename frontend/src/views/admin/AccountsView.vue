@@ -2408,10 +2408,15 @@ const patchUpstreamBillingSnapshot = (accountID: number, snapshot: UpstreamBilli
   const account = accounts.value.find(item => item.id === accountID)
   if (!account) return
   upstreamBillingNow.value = Date.now()
-  patchAccountInList({
+  const syncedRate = snapshot.synced_rate_multiplier
+  const nextAccount: Account = {
     ...account,
     extra: { ...account.extra, upstream_billing_probe: snapshot }
-  })
+  }
+  if (typeof syncedRate === 'number' && Number.isFinite(syncedRate) && syncedRate > 0) {
+    nextAccount.rate_multiplier = syncedRate
+  }
+  patchAccountInList(nextAccount)
 }
 const showUpstreamActionFeedback = (
   feedback: Map<number, UpstreamActionFeedback>,
@@ -2446,7 +2451,6 @@ const handleProbeUpstreamBilling = async (account: Account) => {
     const result = await adminAPI.accounts.probeUpstreamBilling(account.id)
     if (result.snapshot) {
       patchUpstreamBillingSnapshot(account.id, result.snapshot)
-      await refreshAccountsAfterUpstreamBillingProbe()
     } else {
       upstreamBillingRequestErrors.set(account.id, new Date().toISOString())
     }

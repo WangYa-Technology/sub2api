@@ -157,7 +157,7 @@
           :aria-label="t('admin.accounts.upstreamBilling.manualProbe')"
           :title="t('admin.accounts.upstreamBilling.manualProbe')"
           data-testid="upstream-billing-probe"
-          @click="$emit('probe')"
+          @click.stop="$emit('probe')"
         >
           <Icon :name="rateActionIcon" size="xs" :stroke-width="2" :class="{ 'animate-spin': probing }" />
         </button>
@@ -222,7 +222,7 @@
           :aria-label="quotaActionLabel"
           :title="quotaActionLabel"
           data-testid="upstream-quota-query"
-          @click="$emit('query-quota')"
+          @click.stop="$emit('query-quota')"
         >
           <Icon
             :name="quotaActionIcon"

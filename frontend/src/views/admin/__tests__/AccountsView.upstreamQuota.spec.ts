@@ -504,18 +504,11 @@ describe('admin AccountsView upstream quota state', () => {
     reloaded.unmount()
   })
 
-  it('silently refreshes server ordering after a manual rate probe', async () => {
+  it('patches manual rate probe results without reloading the accounts page', async () => {
     localStorage.setItem('account-table-sort', JSON.stringify({ key: 'upstream_billing_rate', order: 'asc' }))
     listAccounts
       .mockResolvedValueOnce({ items: [account(7), account(11)], total: 40, page: 1, page_size: 20, pages: 2 })
       .mockResolvedValueOnce({ items: [account(7), account(11)], total: 40, page: 2, page_size: 20, pages: 2 })
-      .mockResolvedValueOnce({
-        items: [account(11), account(7, { updated_at: '2026-07-17T00:01:00Z' })],
-        total: 40,
-        page: 2,
-        page_size: 20,
-        pages: 2
-      })
     getUpstreamBillingRatesWithEtag.mockResolvedValueOnce({
       notModified: false,
       etag: '"rate-v1"',
@@ -546,8 +539,7 @@ describe('admin AccountsView upstream quota state', () => {
     await wrapper.get('[data-test="quota-cell"][data-account-id="7"] [data-test="probe-rate"]').trigger('click')
     await flushPromises()
 
-    expect(listAccounts).toHaveBeenCalledTimes(3)
-    expect(listAccounts.mock.calls[2]?.[0]).toBe(2)
+    expect(listAccounts).toHaveBeenCalledTimes(2)
     expect(listWithEtag).not.toHaveBeenCalled()
     expect(getBatchTodayStats).toHaveBeenCalledTimes(2)
     expect(wrapper.get('[data-test="accounts-table"]').attributes('data-loading')).toBe('false')
@@ -555,7 +547,7 @@ describe('admin AccountsView upstream quota state', () => {
     expect(wrapper.get('[data-test="go-page-2"]').attributes('data-page')).toBe('2')
 
     await flushPromises()
-    expect(wrapper.findAll('[data-test="virtual-row"]').map(row => row.attributes('data-account-id'))).toEqual(['11', '7'])
+    expect(wrapper.findAll('[data-test="virtual-row"]').map(row => row.attributes('data-account-id'))).toEqual(['7', '11'])
     expect(wrapper.get('[data-test="go-page-2"]').attributes('data-page')).toBe('2')
     wrapper.unmount()
   })

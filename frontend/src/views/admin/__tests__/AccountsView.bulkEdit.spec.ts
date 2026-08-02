@@ -594,7 +594,7 @@ describe('admin AccountsView bulk edit scope', () => {
     consoleError.mockRestore()
   })
 
-  it('refreshes the account row after a successful single-account probe', async () => {
+  it('patches the account row without reloading after a successful single-account probe', async () => {
     const account = (rateMultiplier: number) => ({
       id: 7,
       name: 'account-7',
@@ -609,12 +609,12 @@ describe('admin AccountsView bulk edit scope', () => {
     })
     listAccounts
       .mockResolvedValueOnce({ items: [account(0.25)], total: 1, page: 1, page_size: 20, pages: 1 })
-      .mockResolvedValueOnce({ items: [account(0.065)], total: 1, page: 1, page_size: 20, pages: 1 })
     probeUpstreamBilling.mockResolvedValue({
       account_id: 7,
       snapshot: {
         status: 'ok',
         data: { effective_rate_multiplier: 0.065 },
+        synced_rate_multiplier: 0.065,
         last_attempt_at: '2026-07-13T00:00:00Z',
         next_probe_at: '2026-07-13T00:30:00Z'
       }
@@ -660,7 +660,7 @@ describe('admin AccountsView bulk edit scope', () => {
     await flushPromises()
 
     expect(probeUpstreamBilling).toHaveBeenCalledWith(7)
-    expect(listAccounts).toHaveBeenCalledTimes(2)
+    expect(listAccounts).toHaveBeenCalledTimes(1)
     expect(wrapper.get('[data-test="account-rate"]').text()).toBe('0.065x')
   })
 })

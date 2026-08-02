@@ -37,14 +37,11 @@
       <PlazaFilterBar
         :platforms="platforms"
         :groups="groupOptions"
-        :rates="rateOptions"
         :platform="selectedPlatform"
         :group-id="selectedGroupId"
-        :rate="selectedRate"
         :search="searchQuery"
         @update:platform="selectedPlatform = $event"
         @update:group-id="selectedGroupId = $event"
-        @update:rate="selectedRate = $event"
         @update:search="searchQuery = $event"
       />
 
@@ -92,7 +89,6 @@ const isAuthenticated = computed(() => authStore.isAuthenticated)
 
 const selectedPlatform = ref<string>('all')
 const selectedGroupId = ref<number | 'all'>('all')
-const selectedRate = ref<number | 'all'>('all')
 const searchQuery = ref('')
 
 const searchActive = computed(() => searchQuery.value.trim() !== '')
@@ -116,13 +112,8 @@ const groupOptions = computed(() =>
   (props.response?.groups ?? []).map((g) => ({
     id: g.id,
     name: g.name,
-    platform: g.platform,
-    rate: effectiveRate(g)
+    platform: g.platform
   }))
-)
-
-const rateOptions = computed(() =>
-  [...new Set((props.response?.groups ?? []).map((g) => effectiveRate(g)))].sort((a, b) => a - b)
 )
 
 const filteredGroups = computed(() => {
@@ -132,9 +123,6 @@ const filteredGroups = computed(() => {
   }
   if (selectedGroupId.value !== 'all') {
     groups = groups.filter((g) => g.id === selectedGroupId.value)
-  }
-  if (selectedRate.value !== 'all') {
-    groups = groups.filter((g) => effectiveRate(g) === selectedRate.value)
   }
   // 模型名搜索:分组内只留命中的模型,整组无命中则隐藏该分组。
   const q = searchQuery.value.trim().toLowerCase()

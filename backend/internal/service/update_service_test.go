@@ -35,6 +35,10 @@ func (s *updateCheckGitHubStub) FetchLatestRelease(context.Context, string) (*Gi
 	return s.release, nil
 }
 
+func (s *updateCheckGitHubStub) FetchRecentReleases(context.Context, string, int) ([]*GitHubRelease, error) {
+	return nil, nil
+}
+
 func TestCompareVersionsUsesNumericBaseVersion(t *testing.T) {
 	tests := []struct {
 		name            string

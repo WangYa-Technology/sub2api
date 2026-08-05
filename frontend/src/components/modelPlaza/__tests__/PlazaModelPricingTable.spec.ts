@@ -45,10 +45,13 @@ function mountTable(
   models: PlazaModel[],
   rateMultiplier: number,
   userRateMultiplier?: number | null,
-  cnyPerUsd = 1
+  cnyPerUsdOrExtra: number | { imageRateIndependent?: boolean; imageRateMultiplier?: number | null } = 1,
+  extraProps?: { imageRateIndependent?: boolean; imageRateMultiplier?: number | null }
 ) {
+  const cnyPerUsd = typeof cnyPerUsdOrExtra === 'number' ? cnyPerUsdOrExtra : 1
+  const imageRateProps = typeof cnyPerUsdOrExtra === 'number' ? extraProps : cnyPerUsdOrExtra
   return mount(PlazaModelPricingTable, {
-    props: { models, rateMultiplier, userRateMultiplier: userRateMultiplier ?? null, cnyPerUsd }
+    props: { models, rateMultiplier, userRateMultiplier: userRateMultiplier ?? null, cnyPerUsd, ...imageRateProps }
   })
 }
 
@@ -288,6 +291,69 @@ describe('PlazaModelPricingTable', () => {
     expect(text).toContain('¥1.50')
     expect(text).toContain('¥7.50')
     expect(text).toContain('$15.00')
+  })
+
+  it('生图独立倍率开启时,按图价格 × 独立倍率,不乘分组倍率;倍率列展示独立倍率', () => {
+    const model = tokenModel({
+      name: 'gpt-image-2',
+      pricing: {
+        billing_mode: 'image',
+        input_price: null,
+        output_price: null,
+        cache_write_price: null,
+        cache_read_price: null,
+        image_input_price: null,
+        image_output_price: null,
+        per_request_price: null,
+        intervals: [
+          {
+            min_tokens: 0,
+            max_tokens: null,
+            tier_label: '1K',
+            input_price: null,
+            output_price: null,
+            cache_write_price: null,
+            cache_read_price: null,
+            per_request_price: 0.02
+          }
+        ]
+      },
+      official_pricing: null
+    })
+    const wrapper = mountTable([model], 0.1, null, {
+      imageRateIndependent: true,
+      imageRateMultiplier: 1
+    })
+    const text = wrapper.text()
+    // 0.02 × 1(独立倍率),而非 0.02 × 0.1
+    expect(text).toContain('¥0.02')
+    expect(text).not.toContain('¥0.002')
+    // 倍率列展示独立倍率 1x,而非分组倍率 0.1x
+    const rateCell = wrapper.findAll('tbody tr td').at(-1)!
+    expect(rateCell.text()).toBe('1x')
+  })
+
+  it('生图独立倍率关闭时,按图价格仍乘分组/专属生效倍率', () => {
+    const model = tokenModel({
+      name: 'gpt-image-2',
+      pricing: {
+        billing_mode: 'image',
+        input_price: null,
+        output_price: null,
+        cache_write_price: null,
+        cache_read_price: null,
+        image_input_price: null,
+        image_output_price: null,
+        per_request_price: 0.2,
+        intervals: []
+      },
+      official_pricing: null
+    })
+    const wrapper = mountTable([model], 0.1, null, { imageRateIndependent: false })
+    const text = wrapper.text()
+    expect(text).toContain('¥0.02')
+    const rateCell = wrapper.findAll('tbody tr td').at(-1)!
+    expect(rateCell.text()).toBe('0.1x')
   })
 
   it('按图模型主行展示阶梯芯片,不把 image_output_price(每 token)当按次价', () => {

@@ -24,6 +24,7 @@ type UpdateCache interface {
 // GitHubReleaseClient 获取 GitHub release 信息的接口
 type GitHubReleaseClient interface {
 	FetchLatestRelease(ctx context.Context, repo string) (*GitHubRelease, error)
+	FetchRecentReleases(ctx context.Context, repo string, perPage int) ([]*GitHubRelease, error)
 }
 
 // UpdateService handles software updates
@@ -70,6 +71,8 @@ type GitHubRelease struct {
 	Body        string `json:"body"`
 	PublishedAt string `json:"published_at"`
 	HTMLURL     string `json:"html_url"`
+	Draft       bool   `json:"draft"`
+	Prerelease  bool   `json:"prerelease"`
 }
 
 // CheckUpdate checks for available updates

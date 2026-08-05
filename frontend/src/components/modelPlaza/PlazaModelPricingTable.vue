@@ -185,13 +185,13 @@
                   class="inline-flex items-center gap-1 rounded-md bg-gray-100 px-2 py-0.5 font-mono text-xs text-gray-800 dark:bg-dark-700/60 dark:text-gray-200"
                 >
                   <span class="font-sans text-gray-400 dark:text-dark-500">{{ tierLabel(iv) }}</span>
-                  {{ paidRequestPrice(iv.per_request_price)
+                  {{ paidRequestPrice(m, iv.per_request_price)
                   }}<span class="font-sans text-gray-400 dark:text-dark-500">{{ perUnitSuffix(m) }}</span>
                 </span>
               </div>
               <template v-else-if="m.pricing?.per_request_price != null">
                 <span class="font-mono font-semibold text-gray-900 dark:text-gray-50">
-                  {{ paidRequestPrice(m.pricing.per_request_price) }}
+                  {{ paidRequestPrice(m, m.pricing.per_request_price) }}
                 </span>
                 <span class="ml-1 text-xs text-gray-400 dark:text-dark-500">{{ perUnitSuffix(m) }}</span>
               </template>
@@ -229,11 +229,14 @@
             <span v-else class="text-gray-400 dark:text-dark-500">-</span>
           </td>
 
-          <!-- 人民币实付输出价相对官方美元输出价的近似倍率 -->
+          <!-- 人民币实付输出价的近似倍率;生图独立计费时展示独立倍率 -->
           <td
             class="border-l border-gray-100 py-2.5 pl-3 pr-5 text-right align-middle font-mono text-xs dark:border-dark-700/60"
           >
-            <span class="font-bold text-gray-700 dark:text-gray-300">{{ approximateRate(m) }}</span>
+            <span v-if="billingMode(m) !== BILLING_MODE_TOKEN" class="font-bold text-gray-700 dark:text-gray-300">
+              {{ requestRate(m) }}x
+            </span>
+            <span v-else class="font-bold text-gray-700 dark:text-gray-300">{{ approximateRate(m) }}</span>
           </td>
         </tr>
       </tbody>
@@ -266,6 +269,9 @@ const props = defineProps<{
   userRateMultiplier?: number | null
   /** 充值换算倍率：多少人民币 = 1 美元。 */
   cnyPerUsd: number
+  /** 生图独立倍率:true 时图片计费模型的实付倍率取 imageRateMultiplier,不取分组/专属倍率。 */
+  imageRateIndependent?: boolean
+  imageRateMultiplier?: number | null
 }>()
 
 const { t } = useI18n()
@@ -322,10 +328,20 @@ function paidPerMillion(value: number | null | undefined): string {
   )
 }
 
-/** 按次 / 按图片单价(乘生效倍率与充值换算倍率,不换算 1M)。 */
-function paidRequestPrice(value: number | null | undefined): string {
+/** 图片计费模型且分组开启生图独立倍率:实付倍率取独立倍率,与计费口径一致。 */
+function usesIndependentImageRate(m: PlazaModel): boolean {
+  return billingMode(m) === BILLING_MODE_IMAGE && props.imageRateIndependent === true
+}
+
+/** 按次/按图片行的生效倍率。 */
+function requestRate(m: PlazaModel): number {
+  return usesIndependentImageRate(m) ? (props.imageRateMultiplier ?? 1) : effectiveRate.value
+}
+
+/** 按次 / 按图片单价(乘该行生效倍率与充值换算倍率,不换算 1M)。 */
+function paidRequestPrice(m: PlazaModel, value: number | null | undefined): string {
   if (value == null) return '-'
-  return formatScaled(value * effectiveRate.value * props.cnyPerUsd, 1, MIN_DECIMALS, '¥')
+  return formatScaled(value * requestRate(m) * props.cnyPerUsd, 1, MIN_DECIMALS, '¥')
 }
 
 /** 官方参考价不乘倍率。 */

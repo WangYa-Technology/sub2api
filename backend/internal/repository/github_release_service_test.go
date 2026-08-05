@@ -126,3 +126,40 @@ func TestGitHubReleaseClientFetchLatestReleaseContextCancel(t *testing.T) {
 	_, err := client.FetchLatestRelease(ctx, "test/repo")
 	require.Error(t, err)
 }
+
+func TestGitHubReleaseClientFetchRecentReleases(t *testing.T) {
+	tests := []struct {
+		name        string
+		perPage     int
+		wantPerPage string
+	}{
+		{name: "default", perPage: 0, wantPerPage: "10"},
+		{name: "requested", perPage: 20, wantPerPage: "20"},
+		{name: "clamped", perPage: 101, wantPerPage: "100"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				require.Equal(t, "/repos/test/repo/releases", r.URL.Path)
+				require.Equal(t, tt.wantPerPage, r.URL.Query().Get("per_page"))
+				_, _ = io.WriteString(w, `[{"tag_name":"v1.1.0","draft":false,"prerelease":true}]`)
+			}))
+			defer server.Close()
+
+			client := newTestGitHubReleaseClient()
+			client.httpClient.Transport = githubReleaseRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+				clone := req.Clone(req.Context())
+				clone.URL.Scheme = "http"
+				clone.URL.Host = server.Listener.Addr().String()
+				return http.DefaultTransport.RoundTrip(clone)
+			})
+
+			releases, err := client.FetchRecentReleases(context.Background(), "test/repo", tt.perPage)
+			require.NoError(t, err)
+			require.Len(t, releases, 1)
+			require.Equal(t, "v1.1.0", releases[0].TagName)
+			require.True(t, releases[0].Prerelease)
+		})
+	}
+}

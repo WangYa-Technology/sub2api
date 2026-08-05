@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"database/sql/driver"
 	"testing"
 	"time"
 
@@ -16,8 +17,17 @@ func TestOpsRepositoryUpsertAndListNodeMetrics(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	repo := &opsRepository{db: db}
 	now := time.Now().UTC().Truncate(time.Second)
+	zeroInt := 0
+	zeroInt64 := int64(0)
 
-	mock.ExpectExec("INSERT INTO ops_node_metrics").WillReturnResult(sqlmock.NewResult(0, 1))
+	args := make([]driver.Value, 23)
+	for i := range args {
+		args[i] = sqlmock.AnyArg()
+	}
+	for _, i := range []int{8, 9, 13, 14, 15, 16, 17, 18, 19, 20, 21} {
+		args[i] = int64(0)
+	}
+	mock.ExpectExec("INSERT INTO ops_node_metrics").WithArgs(args...).WillReturnResult(sqlmock.NewResult(0, 1))
 	err = repo.UpsertNodeMetrics(context.Background(), &service.OpsNodeMetrics{
 		NodeID:                  "jp-01",
 		Region:                  "japan",
@@ -27,6 +37,17 @@ func TestOpsRepositoryUpsertAndListNodeMetrics(t *testing.T) {
 		LastSeenAt:              now,
 		ReportIntervalSeconds:   60,
 		BackgroundTasksDisabled: false,
+		MemoryUsedMB:            &zeroInt64,
+		MemoryTotalMB:           &zeroInt64,
+		DBConnActive:            &zeroInt,
+		DBConnIdle:              &zeroInt,
+		DBConnWaiting:           &zeroInt,
+		DBMaxOpenConns:          &zeroInt,
+		RedisConnTotal:          &zeroInt,
+		RedisConnIdle:           &zeroInt,
+		RedisPoolSize:           &zeroInt,
+		GoroutineCount:          &zeroInt,
+		ConcurrencyQueueDepth:   &zeroInt,
 	})
 	require.NoError(t, err)
 

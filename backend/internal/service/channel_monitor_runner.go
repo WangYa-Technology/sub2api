@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"log/slog"
 	"math/rand/v2"
@@ -9,6 +10,13 @@ import (
 	"time"
 
 	"github.com/alitto/pond/v2"
+	"github.com/google/uuid"
+)
+
+const (
+	channelMonitorReconcileInterval = 30 * time.Second
+	channelMonitorLeaderLockKey     = "channel:monitor:runner:leader"
+	channelMonitorLeaderLockTTL     = 5 * time.Minute
 )
 
 // MonitorScheduler 调度器接口，供 ChannelMonitorService 在 CRUD 时回调，
@@ -48,6 +56,9 @@ type monitorRunnerSvc interface {
 type ChannelMonitorRunner struct {
 	svc            monitorRunnerSvc
 	settingService *SettingService
+	lockCache      LeaderLockCache
+	db             *sql.DB
+	instanceID     string
 
 	pool         pond.Pool
 	parentCtx    context.Context
@@ -109,7 +120,16 @@ func newChannelMonitorRunner(svc monitorRunnerSvc, settingService *SettingServic
 		parentCancel:   cancel,
 		tasks:          make(map[int64]*scheduledMonitor),
 		inFlight:       make(map[int64]struct{}),
+		instanceID:     uuid.NewString(),
 	}
+}
+
+func (r *ChannelMonitorRunner) SetLeaderLock(lockCache LeaderLockCache, db *sql.DB) {
+	if r == nil {
+		return
+	}
+	r.lockCache = lockCache
+	r.db = db
 }
 
 // Start 加载所有 enabled monitor 并为每个建立独立定时任务。
@@ -126,22 +146,72 @@ func (r *ChannelMonitorRunner) Start() {
 	r.started = true
 	r.mu.Unlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), monitorStartupLoadTimeout)
-	defer cancel()
-	enabled, err := r.svc.ListEnabledMonitors(ctx)
+	ctx, cancel := context.WithTimeout(r.parentCtx, monitorStartupLoadTimeout)
+	err := r.reconcile(ctx)
+	cancel()
 	if err != nil {
 		slog.Error("channel_monitor: load enabled monitors failed at startup", "error", err)
-		return
 	}
+	r.wg.Add(1)
+	go r.runReconciler()
+	slog.Info("channel_monitor: runner started", "scheduled_tasks", r.taskCount())
+}
+
+func (r *ChannelMonitorRunner) runReconciler() {
+	defer r.wg.Done()
+	ticker := time.NewTicker(channelMonitorReconcileInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-r.parentCtx.Done():
+			return
+		case <-ticker.C:
+			ctx, cancel := context.WithTimeout(r.parentCtx, monitorStartupLoadTimeout)
+			err := r.reconcile(ctx)
+			cancel()
+			if err != nil && !errors.Is(err, context.Canceled) {
+				slog.Warn("channel_monitor: reconcile enabled monitors failed", "error", err)
+			}
+		}
+	}
+}
+
+func (r *ChannelMonitorRunner) reconcile(ctx context.Context) error {
+	enabled, err := r.svc.ListEnabledMonitors(ctx)
+	if err != nil {
+		return err
+	}
+	seen := make(map[int64]struct{}, len(enabled))
 	for _, m := range enabled {
+		if m == nil || !m.Enabled || m.APIKeyDecryptFailed {
+			continue
+		}
+		seen[m.ID] = struct{}{}
 		r.Schedule(m)
 	}
-	slog.Info("channel_monitor: runner started", "scheduled_tasks", len(enabled))
+	r.mu.Lock()
+	stale := make([]int64, 0)
+	for id := range r.tasks {
+		if _, ok := seen[id]; !ok {
+			stale = append(stale, id)
+		}
+	}
+	r.mu.Unlock()
+	for _, id := range stale {
+		r.Unschedule(id)
+	}
+	return nil
+}
+
+func (r *ChannelMonitorRunner) taskCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.tasks)
 }
 
 // Schedule 为指定监控创建（或重置）独立定时任务。
 //   - m.Enabled=false 或 APIKeyDecryptFailed=true → 等同于 Unschedule(m.ID)
-//   - 已存在的任务会先被取消再重建（适用于 IntervalSeconds 变更场景）
+//   - 未变化的任务保持原定时进度；名称/间隔/jitter 变化时才重建
 //   - 新任务立即触发首次检测，之后按 IntervalSeconds 周期触发
 func (r *ChannelMonitorRunner) Schedule(m *ChannelMonitor) {
 	if r == nil || m == nil {
@@ -180,6 +250,10 @@ func (r *ChannelMonitorRunner) Schedule(m *ChannelMonitor) {
 		return
 	}
 	if existing, ok := r.tasks[m.ID]; ok {
+		if existing.name == m.Name && existing.interval == interval && existing.jitter == jitter {
+			r.mu.Unlock()
+			return
+		}
 		existing.cancel()
 	}
 	ctx, cancel := context.WithCancel(r.parentCtx)
@@ -266,7 +340,22 @@ func (r *ChannelMonitorRunner) fire(ctx context.Context, task *scheduledMonitor)
 		return
 	}
 	if _, ok := r.pool.TrySubmit(func() {
-		r.runOne(task.id, task.name)
+		release, acquired := tryAcquireSingletonLeaderLock(
+			ctx,
+			r.lockCache,
+			r.db,
+			channelMonitorLeaderLockKey,
+			r.instanceID,
+			channelMonitorLeaderLockTTL,
+		)
+		if !acquired {
+			r.releaseInFlight(task.id)
+			return
+		}
+		if release != nil {
+			defer release()
+		}
+		r.runOne(ctx, task.id, task.name)
 	}); !ok {
 		// 池满：丢弃本次检测，但必须释放已占用的 inFlight 槽，否则该 monitor 会被永久卡住。
 		r.releaseInFlight(task.id)
@@ -296,8 +385,8 @@ func (r *ChannelMonitorRunner) releaseInFlight(id int64) {
 
 // runOne 执行单个监控的检测。普通错误只记日志；API key 解密失败会撤销任务。
 // 任务结束时（含 panic recover）必须释放 in-flight 槽。
-func (r *ChannelMonitorRunner) runOne(id int64, name string) {
-	ctx, cancel := context.WithTimeout(context.Background(), monitorRequestTimeout+monitorPingTimeout+monitorRunOneBuffer)
+func (r *ChannelMonitorRunner) runOne(parent context.Context, id int64, name string) {
+	ctx, cancel := context.WithTimeout(parent, monitorRequestTimeout+monitorPingTimeout+monitorRunOneBuffer)
 	defer cancel()
 
 	defer r.releaseInFlight(id)

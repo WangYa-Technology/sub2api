@@ -53,6 +53,7 @@ const adminSettingsStore = useAdminSettingsStore()
 const realtimeWindow = ref<RealtimeWindow>('1min')
 
 const overview = computed(() => props.overview ?? null)
+const servingNode = computed(() => overview.value?.serving_node ?? null)
 const systemMetrics = computed(() => overview.value?.system_metrics ?? null)
 const nodeMetrics = computed(() => overview.value?.node_metrics ?? [])
 const onlineNodeCount = computed(() => nodeMetrics.value.filter((node) => node.online).length)
@@ -1454,6 +1455,17 @@ function handleToolbarRefresh() {
     <!-- Integrated: System health (cards) -->
     <div v-if="overview" class="mt-2 border-t border-gray-100 pt-4 dark:border-dark-700">
       <div class="mb-2 flex min-h-5 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400">
+        <span class="font-semibold text-gray-700 dark:text-gray-300">{{ t('admin.ops.servingNode') }}</span>
+        <template v-if="servingNode?.node_id">
+          <span class="h-1.5 w-1.5 rounded-full bg-blue-500"></span>
+          <span class="font-mono font-semibold text-gray-900 dark:text-gray-100">{{ servingNode.node_id }}</span>
+          <span v-if="servingNode.region" class="text-gray-300 dark:text-gray-600">·</span>
+          <span v-if="servingNode.region">{{ servingNode.region }}</span>
+          <span v-if="servingNode.hostname" class="text-gray-300 dark:text-gray-600">·</span>
+          <span v-if="servingNode.hostname" class="font-mono">{{ servingNode.hostname }}</span>
+        </template>
+        <span v-else class="text-gray-400">{{ t('admin.ops.servingNodeUnknown') }}</span>
+        <span class="mx-1 text-gray-300 dark:text-gray-600">|</span>
         <span class="font-semibold text-gray-700 dark:text-gray-300">{{ t('admin.ops.metricsSource') }}</span>
         <template v-if="systemMetrics?.source_node_id">
           <span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>

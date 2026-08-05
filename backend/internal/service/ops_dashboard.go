@@ -46,22 +46,15 @@ func (s *OpsService) GetDashboardOverview(ctx context.Context, filter *OpsDashbo
 		}
 		return nil, err
 	}
+	overview.ServingNode = resolveOpsNodeIdentity(s.cfg)
 
 	// Best-effort system health + jobs; dashboard metrics should still render if these are missing.
-	if metrics, err := s.opsRepo.GetLatestSystemMetrics(ctx, 1); err == nil {
-		// Attach config-derived limits so the UI can show "current / max" for connection pools.
-		// These are best-effort and should never block the dashboard rendering.
-		if s != nil && s.cfg != nil {
-			if s.cfg.Database.MaxOpenConns > 0 {
-				metrics.DBMaxOpenConns = intPtr(s.cfg.Database.MaxOpenConns)
-			}
-			if s.cfg.Redis.PoolSize > 0 {
-				metrics.RedisPoolSize = intPtr(s.cfg.Redis.PoolSize)
-			}
-		}
+	var metrics *OpsSystemMetricsSnapshot
+	metrics, metricsErr := s.opsRepo.GetLatestSystemMetrics(ctx, 1)
+	if metricsErr == nil {
 		overview.SystemMetrics = metrics
-	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		log.Printf("[Ops] GetLatestSystemMetrics failed: %v", err)
+	} else if !errors.Is(metricsErr, sql.ErrNoRows) {
+		log.Printf("[Ops] GetLatestSystemMetrics failed: %v", metricsErr)
 	}
 
 	now := time.Now().UTC()
@@ -76,6 +69,12 @@ func (s *OpsService) GetDashboardOverview(ctx context.Context, filter *OpsDashbo
 	} else {
 		log.Printf("[Ops] ListNodeMetrics failed: %v", err)
 	}
+	localDBMax, localRedisPool := 0, 0
+	if s.cfg != nil {
+		localDBMax = s.cfg.Database.MaxOpenConns
+		localRedisPool = s.cfg.Redis.PoolSize
+	}
+	attachSystemMetricPoolLimits(metrics, overview.NodeMetrics, localDBMax, localRedisPool)
 
 	if heartbeats, err := s.opsRepo.ListJobHeartbeats(ctx); err == nil {
 		overview.JobHeartbeats = heartbeats
@@ -86,6 +85,29 @@ func (s *OpsService) GetDashboardOverview(ctx context.Context, filter *OpsDashbo
 	overview.HealthScore = computeDashboardHealthScore(now, overview)
 
 	return overview, nil
+}
+
+func attachSystemMetricPoolLimits(metrics *OpsSystemMetricsSnapshot, nodes []*OpsNodeMetrics, localDBMax, localRedisPool int) {
+	if metrics == nil {
+		return
+	}
+	if metrics.SourceNodeID != "" {
+		for _, node := range nodes {
+			if node != nil && node.NodeID == metrics.SourceNodeID {
+				metrics.DBMaxOpenConns = node.DBMaxOpenConns
+				metrics.RedisPoolSize = node.RedisPoolSize
+				return
+			}
+		}
+		return
+	}
+	// Compatibility fallback for snapshots created before source_node_id existed.
+	if localDBMax > 0 {
+		metrics.DBMaxOpenConns = intPtr(localDBMax)
+	}
+	if localRedisPool > 0 {
+		metrics.RedisPoolSize = intPtr(localRedisPool)
+	}
 }
 
 func opsNodeIsOnline(now time.Time, node *OpsNodeMetrics) bool {

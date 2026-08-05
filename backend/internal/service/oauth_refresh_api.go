@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -127,8 +128,17 @@ func snapshotOAuthRefreshAccount(account *Account) *Account {
 type OAuthRefreshAPI struct {
 	accountRepo AccountRepository
 	tokenCache  GeminiTokenCache // 可选，nil = 无分布式锁
+	db          *sql.DB          // 可选；配置时作为跨区域刷新锁的权威后端
 	lockTTL     time.Duration
 	localLocks  sync.Map // key: cacheKey string -> value: *contextMutex
+}
+
+// SetGlobalLockDB injects the shared PostgreSQL pool used to coordinate OAuth
+// refreshes across regions that do not share Redis.
+func (api *OAuthRefreshAPI) SetGlobalLockDB(db *sql.DB) {
+	if api != nil {
+		api.db = db
+	}
 }
 
 // NewOAuthRefreshAPI 创建统一刷新 API
@@ -159,12 +169,13 @@ func (api *OAuthRefreshAPI) getLocalLock(cacheKey string) *contextMutex {
 // RefreshIfNeeded 在分布式锁保护下按需刷新 OAuth token
 //
 // 流程:
-//  1. 获取分布式锁
-//  2. 从 DB 重读最新 account（防止使用过时的 refresh_token）
-//  3. 二次检查是否仍需刷新
-//  4. 调用 executor.Refresh() 执行平台特定刷新逻辑
-//  5. 设置 _token_version + 更新 DB
-//  6. 释放锁
+//  1. 获取区域 Redis 兼容锁（与滚动发布中的旧节点互斥）
+//  2. 获取共享 PostgreSQL 租约（新节点跨区域互斥）
+//  3. 从 DB 重读最新 account（防止使用过时的 refresh_token）
+//  4. 二次检查是否仍需刷新
+//  5. 调用 executor.Refresh() 执行平台特定刷新逻辑
+//  6. 设置 _token_version + 更新 DB
+//  7. 释放数据库租约和 Redis 兼容锁
 func (api *OAuthRefreshAPI) RefreshIfNeeded(
 	ctx context.Context,
 	account *Account,
@@ -190,11 +201,17 @@ func (api *OAuthRefreshAPI) RefreshIfNeeded(
 	}
 	defer localMu.Unlock()
 
-	// 1. 获取分布式锁
+	// 1. 滚动兼容锁。新节点仍先获取区域 Redis 锁，使同一区域旧节点
+	// （仅认识 Redis 锁）不能并发刷新。配置共享数据库时 Redis 错误必须
+	// fail closed；否则无法保证与仍在运行的旧节点互斥。
 	if api.tokenCache != nil {
 		acquired, lockErr := api.tokenCache.AcquireRefreshLock(ctx, cacheKey, api.lockTTL)
 		if lockErr != nil {
-			// Redis 错误，降级为无锁刷新（进程内互斥锁仍生效）
+			if api.db != nil {
+				return nil, fmt.Errorf("oauth refresh compatibility lock: %w", lockErr)
+			}
+			// Redis-only legacy/single-instance mode preserves the existing
+			// availability behavior when no shared database was injected.
 			slog.Warn("oauth_refresh_lock_failed_degraded",
 				"account_id", account.ID,
 				"cache_key", cacheKey,
@@ -208,7 +225,20 @@ func (api *OAuthRefreshAPI) RefreshIfNeeded(
 		}
 	}
 
-	// 2. 从 DB 重读最新 account（锁保护下，确保使用最新的 refresh_token）
+	// 2. 跨区域权威租约。单条 SQL 获取后立即归还连接池，不在上游刷新
+	// 期间占用数据库连接；owner + expiry 保证释放安全并支持崩溃回收。
+	if api.db != nil {
+		release, acquired, lockErr := tryAcquireOAuthRefreshLease(ctx, api.db, cacheKey, api.lockTTL)
+		if lockErr != nil {
+			return nil, fmt.Errorf("oauth refresh database lease: %w", lockErr)
+		}
+		if !acquired {
+			return &OAuthRefreshResult{LockHeld: true}, nil
+		}
+		defer release()
+	}
+
+	// 3. 从 DB 重读最新 account（锁保护下，确保使用最新的 refresh_token）
 	freshAccount, err := api.accountRepo.GetByID(ctx, account.ID)
 	if err != nil {
 		if requestPath {
@@ -246,14 +276,14 @@ func (api *OAuthRefreshAPI) RefreshIfNeeded(
 		return &OAuthRefreshResult{Account: freshAccount}, nil
 	}
 
-	// 3. 二次检查是否仍需刷新（另一条路径可能已刷新）
+	// 4. 二次检查是否仍需刷新（另一条路径可能已刷新）
 	if !executor.NeedsRefresh(freshAccount, refreshWindow) {
 		return &OAuthRefreshResult{
 			Account: freshAccount,
 		}, nil
 	}
 
-	// 4. 执行平台特定刷新逻辑
+	// 5. 执行平台特定刷新逻辑
 	attemptedAccount := snapshotOAuthRefreshAccount(freshAccount)
 	newCredentials, refreshErr := executor.Refresh(ctx, freshAccount)
 	if ctxErr := ctx.Err(); ctxErr != nil {
@@ -290,7 +320,7 @@ func (api *OAuthRefreshAPI) RefreshIfNeeded(
 		return result, refreshErr
 	}
 
-	// 5. 设置版本号 + 更新 DB
+	// 6. 设置版本号 + 更新 DB
 	if newCredentials != nil {
 		newCredentials["_token_version"] = time.Now().UnixMilli()
 		if freshAccount.IsGrokOAuth() {

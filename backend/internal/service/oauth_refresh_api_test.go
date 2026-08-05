@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -151,6 +152,8 @@ func (e *refreshAPIExecutorStub) CacheKey(account *Account) string {
 type refreshAPICacheStub struct {
 	lockResult    bool
 	lockErr       error
+	acquireCalls  int
+	acquireKey    string
 	releaseCalls  int
 	releaseCtxErr error
 	deleteCalls   int
@@ -173,7 +176,9 @@ func (c *refreshAPICacheStub) DeleteAccessToken(ctx context.Context, key string)
 	return nil
 }
 
-func (c *refreshAPICacheStub) AcquireRefreshLock(context.Context, string, time.Duration) (bool, error) {
+func (c *refreshAPICacheStub) AcquireRefreshLock(_ context.Context, key string, _ time.Duration) (bool, error) {
+	c.acquireCalls++
+	c.acquireKey = key
 	return c.lockResult, c.lockErr
 }
 
@@ -248,6 +253,129 @@ func TestRefreshIfNeeded_LockHeld(t *testing.T) {
 	require.False(t, result.Refreshed)
 	require.Equal(t, 0, repo.updateCalls)
 	require.Equal(t, 0, executor.refreshCalls)
+}
+
+func TestRefreshIfNeeded_DatabaseLeaseCoordinatesAfterCompatibilityLock(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	account := &Account{ID: 21, Platform: PlatformAnthropic, Status: StatusActive}
+	repo := &refreshAPIAccountRepo{account: account}
+	cache := &refreshAPICacheStub{lockResult: true}
+	executor := &refreshAPIExecutorStub{needsRefresh: true}
+	cacheKey := executor.CacheKey(account)
+	mock.ExpectQuery("INSERT INTO oauth_refresh_leases").
+		WithArgs(oauthRefreshLeaseKey(cacheKey), sqlmock.AnyArg(), defaultRefreshLockTTL.Milliseconds()).
+		WillReturnRows(sqlmock.NewRows([]string{"acquired"}))
+
+	api := NewOAuthRefreshAPI(repo, cache)
+	api.SetGlobalLockDB(db)
+	result, err := api.RefreshIfNeeded(context.Background(), account, executor, 3*time.Minute)
+
+	require.NoError(t, err)
+	require.True(t, result.LockHeld)
+	require.Zero(t, executor.refreshCalls)
+	require.Equal(t, 1, cache.acquireCalls, "new nodes must remain compatible with Redis-only old nodes")
+	require.Equal(t, cacheKey, cache.acquireKey)
+	require.Equal(t, 1, cache.releaseCalls, "compatibility lock must be released when the database lease is held")
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestRefreshIfNeeded_DatabaseLeaseErrorFailsClosedAndReleasesCompatibilityLock(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	account := &Account{ID: 22, Platform: PlatformAnthropic, Status: StatusActive}
+	repo := &refreshAPIAccountRepo{account: account}
+	cache := &refreshAPICacheStub{lockResult: true}
+	executor := &refreshAPIExecutorStub{needsRefresh: true}
+	mock.ExpectQuery("INSERT INTO oauth_refresh_leases").
+		WillReturnError(errors.New("database unavailable"))
+
+	api := NewOAuthRefreshAPI(repo, cache)
+	api.SetGlobalLockDB(db)
+	result, err := api.RefreshIfNeeded(context.Background(), account, executor, 3*time.Minute)
+
+	require.ErrorContains(t, err, "oauth refresh database lease")
+	require.Nil(t, result)
+	require.Zero(t, executor.refreshCalls)
+	require.Equal(t, 1, cache.releaseCalls)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestRefreshIfNeeded_DatabaseLeaseReturnsPoolConnectionBeforeRefresh(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = db.Close() })
+
+	account := &Account{ID: 23, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Status: StatusActive}
+	repo := &refreshAPIAccountRepo{account: account}
+	cache := &refreshAPICacheStub{lockResult: true}
+	cacheKey := "test:api:" + PlatformAnthropic
+	mock.ExpectQuery("INSERT INTO oauth_refresh_leases").
+		WithArgs(oauthRefreshLeaseKey(cacheKey), sqlmock.AnyArg(), defaultRefreshLockTTL.Milliseconds()).
+		WillReturnRows(sqlmock.NewRows([]string{"acquired"}).AddRow(true))
+	mock.ExpectExec("DELETE FROM oauth_refresh_leases").
+		WithArgs(oauthRefreshLeaseKey(cacheKey), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	executor := &refreshAPIExecutorStub{
+		needsRefresh: true,
+		credentials:  map[string]any{"access_token": "new-token"},
+		onRefresh: func() {
+			require.Zero(t, db.Stats().InUse, "upstream refresh must not pin a database connection")
+		},
+	}
+
+	api := NewOAuthRefreshAPI(repo, cache)
+	api.SetGlobalLockDB(db)
+	result, err := api.RefreshIfNeeded(context.Background(), account, executor, 3*time.Minute)
+
+	require.NoError(t, err)
+	require.True(t, result.Refreshed)
+	require.Equal(t, 1, cache.acquireCalls)
+	require.Equal(t, 1, cache.releaseCalls)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestRefreshIfNeeded_CompatibilityLockPreventsDatabaseLeaseAttempt(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	account := &Account{ID: 24, Platform: PlatformAnthropic, Status: StatusActive}
+	repo := &refreshAPIAccountRepo{account: account}
+	cache := &refreshAPICacheStub{lockResult: false}
+	executor := &refreshAPIExecutorStub{needsRefresh: true}
+
+	api := NewOAuthRefreshAPI(repo, cache)
+	api.SetGlobalLockDB(db)
+	result, err := api.RefreshIfNeeded(context.Background(), account, executor, 3*time.Minute)
+
+	require.NoError(t, err)
+	require.True(t, result.LockHeld)
+	require.Equal(t, 1, cache.acquireCalls)
+	require.Zero(t, cache.releaseCalls)
+	require.Zero(t, executor.refreshCalls)
+	require.NoError(t, mock.ExpectationsWereMet(), "database lease must not be attempted after Redis contention")
+}
+
+func TestRefreshIfNeeded_CompatibilityLockErrorFailsClosedWithSharedDatabase(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	account := &Account{ID: 25, Platform: PlatformAnthropic, Status: StatusActive}
+	repo := &refreshAPIAccountRepo{account: account}
+	cache := &refreshAPICacheStub{lockErr: errors.New("redis unavailable")}
+	executor := &refreshAPIExecutorStub{needsRefresh: true}
+
+	api := NewOAuthRefreshAPI(repo, cache)
+	api.SetGlobalLockDB(db)
+	result, err := api.RefreshIfNeeded(context.Background(), account, executor, 3*time.Minute)
+
+	require.ErrorContains(t, err, "oauth refresh compatibility lock")
+	require.Nil(t, result)
+	require.Zero(t, executor.refreshCalls)
+	require.NoError(t, mock.ExpectationsWereMet(), "database lease must not bypass a failed rolling-compatibility lock")
 }
 
 func TestRefreshIfNeeded_LockErrorDegrades(t *testing.T) {

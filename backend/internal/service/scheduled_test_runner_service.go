@@ -33,6 +33,8 @@ type ScheduledTestRunnerService struct {
 	cron      *cron.Cron
 	startOnce sync.Once
 	stopOnce  sync.Once
+	runCtx    context.Context
+	runCancel context.CancelFunc
 }
 
 // NewScheduledTestRunnerService creates a new runner.
@@ -43,6 +45,7 @@ func NewScheduledTestRunnerService(
 	rateLimitSvc *RateLimitService,
 	cfg *config.Config,
 ) *ScheduledTestRunnerService {
+	runCtx, runCancel := context.WithCancel(context.Background())
 	return &ScheduledTestRunnerService{
 		planRepo:       planRepo,
 		scheduledSvc:   scheduledSvc,
@@ -50,6 +53,8 @@ func NewScheduledTestRunnerService(
 		rateLimitSvc:   rateLimitSvc,
 		cfg:            cfg,
 		instanceID:     uuid.NewString(),
+		runCtx:         runCtx,
+		runCancel:      runCancel,
 	}
 }
 
@@ -92,22 +97,30 @@ func (s *ScheduledTestRunnerService) Stop() {
 		return
 	}
 	s.stopOnce.Do(func() {
+		if s.runCancel != nil {
+			s.runCancel()
+		}
 		if s.cron != nil {
-			ctx := s.cron.Stop()
-			select {
-			case <-ctx.Done():
-			case <-time.After(3 * time.Second):
-				logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] cron stop timed out")
-			}
+			<-s.cron.Stop().Done()
 		}
 	})
 }
 
 func (s *ScheduledTestRunnerService) runScheduled() {
+	parent := s.runCtx
+	if parent == nil {
+		parent = context.Background()
+	}
 	// Delay 10s so execution lands at ~:10 of each minute instead of :00.
-	time.Sleep(10 * time.Second)
+	timer := time.NewTimer(10 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-parent.Done():
+		return
+	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(parent, 5*time.Minute)
 	defer cancel()
 	release, acquired := tryAcquireSingletonLeaderLock(ctx, s.lockCache, s.db, scheduledTestRunnerLeaderLockKey, s.instanceID, scheduledTestRunnerLeaderLockTTL)
 	if !acquired {

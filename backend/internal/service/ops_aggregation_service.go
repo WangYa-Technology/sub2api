@@ -63,6 +63,9 @@ type OpsAggregationService struct {
 	stopCh    chan struct{}
 	startOnce sync.Once
 	stopOnce  sync.Once
+	runCtx    context.Context
+	runCancel context.CancelFunc
+	runWG     sync.WaitGroup
 
 	hourlyMu sync.Mutex
 	dailyMu  sync.Mutex
@@ -96,8 +99,16 @@ func (s *OpsAggregationService) Start() {
 		if s.stopCh == nil {
 			s.stopCh = make(chan struct{})
 		}
-		go s.hourlyLoop()
-		go s.dailyLoop()
+		s.runCtx, s.runCancel = context.WithCancel(context.Background())
+		s.runWG.Add(2)
+		go func() {
+			defer s.runWG.Done()
+			s.hourlyLoop()
+		}()
+		go func() {
+			defer s.runWG.Done()
+			s.dailyLoop()
+		}()
 	})
 }
 
@@ -106,9 +117,13 @@ func (s *OpsAggregationService) Stop() {
 		return
 	}
 	s.stopOnce.Do(func() {
+		if s.runCancel != nil {
+			s.runCancel()
+		}
 		if s.stopCh != nil {
 			close(s.stopCh)
 		}
+		s.runWG.Wait()
 	})
 }
 
@@ -159,7 +174,11 @@ func (s *OpsAggregationService) aggregateHourly() {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), opsAggHourlyTimeout)
+	parent := s.runCtx
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, opsAggHourlyTimeout)
 	defer cancel()
 
 	if !s.isMonitoringEnabled(ctx) {
@@ -186,7 +205,7 @@ func (s *OpsAggregationService) aggregateHourly() {
 
 	// Resume from the latest bucket with overlap.
 	{
-		ctxMax, cancelMax := context.WithTimeout(context.Background(), opsAggMaxQueryTimeout)
+		ctxMax, cancelMax := context.WithTimeout(ctx, opsAggMaxQueryTimeout)
 		latest, ok, err := s.opsRepo.GetLatestHourlyBucketStart(ctxMax)
 		cancelMax()
 		if err != nil {
@@ -259,7 +278,11 @@ func (s *OpsAggregationService) aggregateDaily() {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), opsAggDailyTimeout)
+	parent := s.runCtx
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, opsAggDailyTimeout)
 	defer cancel()
 
 	if !s.isMonitoringEnabled(ctx) {
@@ -284,7 +307,7 @@ func (s *OpsAggregationService) aggregateDaily() {
 	start := end.Add(-opsAggBackfillWindow)
 
 	{
-		ctxMax, cancelMax := context.WithTimeout(context.Background(), opsAggMaxQueryTimeout)
+		ctxMax, cancelMax := context.WithTimeout(ctx, opsAggMaxQueryTimeout)
 		latest, ok, err := s.opsRepo.GetLatestDailyBucketDate(ctxMax)
 		cancelMax()
 		if err != nil {

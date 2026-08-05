@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"database/sql/driver"
 	"strings"
 	"testing"
 	"time"
@@ -18,14 +19,36 @@ func TestOpsRepositorySystemMetricsPreservesSourceNode(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	repo := &opsRepository{db: db}
 	now := time.Now().UTC().Truncate(time.Second)
+	zeroInt := 0
+	zeroInt64 := int64(0)
 
-	mock.ExpectExec("INSERT INTO ops_system_metrics").WillReturnResult(sqlmock.NewResult(1, 1))
+	args := make([]driver.Value, 43)
+	for i := range args {
+		args[i] = sqlmock.AnyArg()
+	}
+	for _, i := range []int{18, 23, 24, 29, 31, 32, 36, 37, 38, 39, 40, 41, 42} {
+		args[i] = int64(0)
+	}
+	mock.ExpectExec("INSERT INTO ops_system_metrics").WithArgs(args...).WillReturnResult(sqlmock.NewResult(1, 1))
 	err = repo.InsertSystemMetrics(context.Background(), &service.OpsInsertSystemMetricsInput{
-		CreatedAt:      now,
-		WindowMinutes:  1,
-		SourceNodeID:   "jp-01",
-		SourceRegion:   "japan",
-		SourceHostname: "host-jp-01",
+		CreatedAt:             now,
+		WindowMinutes:         1,
+		SourceNodeID:          "jp-01",
+		SourceRegion:          "japan",
+		SourceHostname:        "host-jp-01",
+		DurationP50Ms:         &zeroInt,
+		DurationMaxMs:         &zeroInt,
+		TTFTP50Ms:             &zeroInt,
+		TTFTMaxMs:             &zeroInt,
+		MemoryUsedMB:          &zeroInt64,
+		MemoryTotalMB:         &zeroInt64,
+		RedisConnTotal:        &zeroInt,
+		RedisConnIdle:         &zeroInt,
+		DBConnActive:          &zeroInt,
+		DBConnIdle:            &zeroInt,
+		DBConnWaiting:         &zeroInt,
+		GoroutineCount:        &zeroInt,
+		ConcurrencyQueueDepth: &zeroInt,
 	})
 	require.NoError(t, err)
 

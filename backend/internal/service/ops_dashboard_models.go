@@ -29,6 +29,14 @@ type OpsPercentiles struct {
 	Max *int `json:"max_ms"`
 }
 
+// OpsNodeIdentity identifies the application instance serving the current
+// dashboard request, not the node that produced a shared metrics snapshot.
+type OpsNodeIdentity struct {
+	NodeID   string `json:"node_id"`
+	Region   string `json:"region"`
+	Hostname string `json:"hostname"`
+}
+
 type OpsDashboardOverview struct {
 	StartTime time.Time `json:"start_time"`
 	EndTime   time.Time `json:"end_time"`
@@ -38,6 +46,9 @@ type OpsDashboardOverview struct {
 	// HealthScore is a backend-computed overall health score (0-100).
 	// It is derived from the monitored metrics in this overview, plus best-effort system metrics/job heartbeats.
 	HealthScore int `json:"health_score"`
+
+	// ServingNode is local to the instance handling this HTTP request.
+	ServingNode *OpsNodeIdentity `json:"serving_node,omitempty"`
 
 	// Latest system-level snapshot (window=1m, global).
 	SystemMetrics *OpsSystemMetricsSnapshot `json:"system_metrics"`

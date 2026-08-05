@@ -56,6 +56,7 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		nil, // redis
 		&service.OpsMetricsCollector{},
 		&service.OpsAggregationService{},
+		nil, // dashboardAggregation
 		&service.OpsAlertEvaluatorService{},
 		&service.OpsCleanupService{},
 		&service.OpsScheduledReportService{},

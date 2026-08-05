@@ -20,6 +20,8 @@ type dashboardAggregationRepoTestStub struct {
 	lastEnd              time.Time
 	watermark            time.Time
 	aggregateErr         error
+	aggregateStarted     chan struct{}
+	blockAggregate       bool
 	cleanupAggregatesErr error
 	cleanupUsageErr      error
 	cleanupDedupErr      error
@@ -30,6 +32,16 @@ func (s *dashboardAggregationRepoTestStub) AggregateRange(ctx context.Context, s
 	s.aggregateCalls++
 	s.lastStart = start
 	s.lastEnd = end
+	if s.aggregateStarted != nil {
+		select {
+		case s.aggregateStarted <- struct{}{}:
+		default:
+		}
+	}
+	if s.blockAggregate {
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	return s.aggregateErr
 }
 
@@ -165,4 +177,38 @@ func TestDashboardAggregationService_TriggerBackfill_TooLarge(t *testing.T) {
 	err := svc.TriggerBackfill(start, end)
 	require.ErrorIs(t, err, ErrDashboardBackfillTooLarge)
 	require.Equal(t, 0, repo.aggregateCalls)
+}
+
+func TestDashboardAggregationServiceStopCancelsAndWaitsForActiveAggregation(t *testing.T) {
+	repo := &dashboardAggregationRepoTestStub{
+		aggregateStarted: make(chan struct{}, 1),
+		blockAggregate:   true,
+		watermark:        time.Now().UTC(),
+	}
+	svc := NewDashboardAggregationService(repo, nil, &config.Config{
+		DashboardAgg: config.DashboardAggregationConfig{
+			Enabled:         true,
+			LookbackSeconds: 60,
+		},
+	})
+	require.True(t, svc.beginWork())
+	go func() {
+		defer svc.lifecycleWG.Done()
+		svc.runScheduledAggregation()
+	}()
+	select {
+	case <-repo.aggregateStarted:
+	case <-time.After(time.Second):
+		t.Fatal("aggregation did not start")
+	}
+	done := make(chan struct{})
+	go func() {
+		svc.Stop()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Stop did not cancel and wait for active aggregation")
+	}
 }

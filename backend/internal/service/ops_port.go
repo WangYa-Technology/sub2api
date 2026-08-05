@@ -179,6 +179,7 @@ type OpsInsertSystemMetricsInput struct {
 
 	DBConnActive  *int
 	DBConnIdle    *int
+	// DBConnWaiting is database/sql's cumulative WaitCount since this instance started.
 	DBConnWaiting *int
 
 	GoroutineCount        *int
@@ -279,6 +280,7 @@ type OpsSystemMetricsSnapshot struct {
 
 	DBConnActive  *int `json:"db_conn_active"`
 	DBConnIdle    *int `json:"db_conn_idle"`
+	// DBConnWaiting is cumulative rather than a current waiter gauge.
 	DBConnWaiting *int `json:"db_conn_waiting"`
 
 	GoroutineCount        *int   `json:"goroutine_count"`
@@ -307,6 +309,7 @@ type OpsNodeMetrics struct {
 
 	DBConnActive          *int `json:"db_conn_active"`
 	DBConnIdle            *int `json:"db_conn_idle"`
+	// DBConnWaiting is cumulative rather than a current waiter gauge.
 	DBConnWaiting         *int `json:"db_conn_waiting"`
 	DBMaxOpenConns        *int `json:"db_max_open_conns"`
 	RedisConnTotal        *int `json:"redis_conn_total"`

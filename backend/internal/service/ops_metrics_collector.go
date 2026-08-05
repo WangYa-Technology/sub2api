@@ -66,6 +66,9 @@ type OpsMetricsCollector struct {
 	stopCh    chan struct{}
 	startOnce sync.Once
 	stopOnce  sync.Once
+	runCtx    context.Context
+	runCancel context.CancelFunc
+	runWG     sync.WaitGroup
 
 	skipLogMu sync.Mutex
 	skipLogAt time.Time
@@ -81,19 +84,7 @@ func NewOpsMetricsCollector(
 	cfg *config.Config,
 	buildInfo BuildInfo,
 ) *OpsMetricsCollector {
-	hostname, _ := os.Hostname()
-	hostname = strings.TrimSpace(hostname)
-	if hostname == "" {
-		hostname = "unknown"
-	}
-	nodeID := hostname
-	region := ""
-	if cfg != nil {
-		if configured := strings.TrimSpace(cfg.Ops.NodeID); configured != "" {
-			nodeID = configured
-		}
-		region = strings.TrimSpace(cfg.Ops.Region)
-	}
+	identity := resolveOpsNodeIdentity(cfg)
 	return &OpsMetricsCollector{
 		opsRepo:            opsRepo,
 		settingRepo:        settingRepo,
@@ -103,9 +94,9 @@ func NewOpsMetricsCollector(
 		db:                 db,
 		redisClient:        redisClient,
 		instanceID:         uuid.NewString(),
-		nodeID:             nodeID,
-		region:             region,
-		hostname:           hostname,
+		nodeID:             identity.NodeID,
+		region:             identity.Region,
+		hostname:           identity.Hostname,
 		version:            strings.TrimSpace(buildInfo.Version),
 		startedAt:          time.Now().UTC(),
 	}
@@ -119,7 +110,12 @@ func (c *OpsMetricsCollector) Start() {
 		if c.stopCh == nil {
 			c.stopCh = make(chan struct{})
 		}
-		go c.run()
+		c.runCtx, c.runCancel = context.WithCancel(context.Background())
+		c.runWG.Add(1)
+		go func() {
+			defer c.runWG.Done()
+			c.run()
+		}()
 	})
 }
 
@@ -128,22 +124,26 @@ func (c *OpsMetricsCollector) Stop() {
 		return
 	}
 	c.stopOnce.Do(func() {
+		if c.runCancel != nil {
+			c.runCancel()
+		}
 		if c.stopCh != nil {
 			close(c.stopCh)
 		}
+		c.runWG.Wait()
 	})
 }
 
 func (c *OpsMetricsCollector) run() {
 	// First run immediately so the dashboard has data soon after startup.
-	c.collectOnce()
+	c.collectOnceWithContext(c.runCtx)
 
 	for {
 		interval := c.getInterval()
 		timer := time.NewTimer(interval)
 		select {
 		case <-timer.C:
-			c.collectOnce()
+			c.collectOnceWithContext(c.runCtx)
 		case <-c.stopCh:
 			timer.Stop()
 			return
@@ -184,6 +184,10 @@ func (c *OpsMetricsCollector) getInterval() time.Duration {
 }
 
 func (c *OpsMetricsCollector) collectOnce() {
+	c.collectOnceWithContext(context.Background())
+}
+
+func (c *OpsMetricsCollector) collectOnceWithContext(parent context.Context) {
 	if c == nil {
 		return
 	}
@@ -197,7 +201,10 @@ func (c *OpsMetricsCollector) collectOnce() {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), opsMetricsCollectorTimeout)
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, opsMetricsCollectorTimeout)
 	defer cancel()
 
 	if !c.isMonitoringEnabled(ctx) {
@@ -289,7 +296,7 @@ func (c *OpsMetricsCollector) collectNodeMetrics(ctx context.Context) *OpsNodeMe
 	}
 	dbOK := c.checkDB(ctx)
 	redisOK := c.checkRedis(ctx)
-	active, idle := c.dbPoolStats()
+	active, idle, waiting := c.dbPoolStats()
 	redisTotal, redisIdle, redisStatsOK := c.redisPoolStats()
 
 	out := &OpsNodeMetrics{
@@ -308,6 +315,7 @@ func (c *OpsMetricsCollector) collectNodeMetrics(ctx context.Context) *OpsNodeMe
 		RedisOK:                 boolPtr(redisOK),
 		DBConnActive:            intPtr(active),
 		DBConnIdle:              intPtr(idle),
+		DBConnWaiting:           intPtr(waiting),
 		GoroutineCount:          intPtr(runtime.NumGoroutine()),
 		ConcurrencyQueueDepth:   c.collectConcurrencyQueueDepth(ctx),
 		BackgroundTasksDisabled: c.cfg != nil && c.cfg.GlobalBackgroundTasks.Disabled,
@@ -912,12 +920,17 @@ func (c *OpsMetricsCollector) redisPoolStats() (total int, idle int, ok bool) {
 	return int(stats.TotalConns), int(stats.IdleConns), true
 }
 
-func (c *OpsMetricsCollector) dbPoolStats() (active int, idle int) {
+func (c *OpsMetricsCollector) dbPoolStats() (active int, idle int, cumulativeWaits int) {
 	if c == nil || c.db == nil {
-		return 0, 0
+		return 0, 0, 0
 	}
 	stats := c.db.Stats()
-	return stats.InUse, stats.Idle
+	waits := stats.WaitCount
+	maxInt := int64(^uint(0) >> 1)
+	if waits > maxInt {
+		waits = maxInt
+	}
+	return stats.InUse, stats.Idle, int(waits)
 }
 
 var opsMetricsCollectorReleaseScript = redis.NewScript(`

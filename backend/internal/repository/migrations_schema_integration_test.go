@@ -127,6 +127,12 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	require.NoError(t, tx.QueryRowContext(context.Background(), "SELECT to_regclass('public.security_secrets')").Scan(&securitySecretsRegclass))
 	require.True(t, securitySecretsRegclass.Valid, "expected security_secrets table to exist")
 
+	// OAuth refresh leases coordinate regions without pinning a DB connection.
+	requireColumn(t, tx, "oauth_refresh_leases", "lock_key_hash", "character", 64, false)
+	requireColumn(t, tx, "oauth_refresh_leases", "owner_id", "uuid", 0, false)
+	requireColumn(t, tx, "oauth_refresh_leases", "expires_at", "timestamp with time zone", 0, false)
+	requireIndex(t, tx, "oauth_refresh_leases", "idx_oauth_refresh_leases_expires_at")
+
 	// scheduler_outbox pending dedup support
 	requireColumn(t, tx, "scheduler_outbox", "dedup_key", "text", 0, true)
 	requireIndex(t, tx, "scheduler_outbox", "idx_scheduler_outbox_pending_dedup_key")

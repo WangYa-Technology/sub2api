@@ -55,11 +55,16 @@ type OpsCleanupService struct {
 	// mu 守护 cron 实例切换 + effective 配置切换。
 	// 这里不再用 startOnce/stopOnce，是因为 Reload 需要"停旧 cron 重启新 cron"，
 	// 而 Once 一旦触发就无法再次执行；改为 started/stopped 布尔配合 mu。
-	mu        sync.Mutex
-	cron      *cron.Cron
-	started   bool
-	stopped   bool
-	effective config.OpsCleanupConfig
+	mu   sync.Mutex
+	cron *cron.Cron
+	// A reload may time out while an old cron job is still exiting. Keep its
+	// completion channel so final shutdown still waits before releasing DB locks.
+	retiredCronDone []<-chan struct{}
+	started         bool
+	stopped         bool
+	effective       config.OpsCleanupConfig
+	runCtx          context.Context
+	runCancel       context.CancelFunc
 
 	warnNoRedisOnce sync.Once
 }
@@ -72,6 +77,7 @@ func NewOpsCleanupService(
 	channelMonitorSvc *ChannelMonitorService,
 	settingRepo SettingRepository,
 ) *OpsCleanupService {
+	runCtx, runCancel := context.WithCancel(context.Background())
 	return &OpsCleanupService{
 		opsRepo:           opsRepo,
 		db:                db,
@@ -80,6 +86,8 @@ func NewOpsCleanupService(
 		channelMonitorSvc: channelMonitorSvc,
 		settingRepo:       settingRepo,
 		instanceID:        uuid.NewString(),
+		runCtx:            runCtx,
+		runCancel:         runCancel,
 	}
 }
 
@@ -114,12 +122,25 @@ func (s *OpsCleanupService) Stop() {
 		return
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.stopped {
+		s.mu.Unlock()
 		return
 	}
 	s.stopped = true
-	s.stopCronLocked()
+	c := s.cron
+	s.cron = nil
+	retired := append([]<-chan struct{}(nil), s.retiredCronDone...)
+	s.retiredCronDone = nil
+	if s.runCancel != nil {
+		s.runCancel()
+	}
+	s.mu.Unlock()
+	if c != nil {
+		<-c.Stop().Done()
+	}
+	for _, done := range retired {
+		<-done
+	}
 }
 
 // stopCronLocked 停掉当前 cron 实例（带 3s 超时）。调用方持锁。
@@ -131,6 +152,7 @@ func (s *OpsCleanupService) stopCronLocked() {
 	select {
 	case <-ctx.Done():
 	case <-time.After(opsCleanupCronStopTimeout):
+		s.retiredCronDone = append(s.retiredCronDone, ctx.Done())
 		logger.LegacyPrintf("service.ops_cleanup", "[OpsCleanup] cron stop timed out")
 	}
 	s.cron = nil
@@ -262,7 +284,11 @@ func (s *OpsCleanupService) runScheduled() {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), opsCleanupRunTimeout)
+	parent := s.runCtx
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, opsCleanupRunTimeout)
 	defer cancel()
 
 	// 让 retention 改动当次生效（schedule/enabled 改动需要 Reload）。

@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 // stubMonitorSvc 实现 monitorRunnerSvc，用于隔离 runner 与真实 service/repo。
@@ -18,6 +20,7 @@ type stubMonitorSvc struct {
 	runErr     error
 	listErr    error
 	runHoldFor time.Duration // RunCheck 内额外阻塞的时长，用来测试 Stop 等待行为
+	exitDelay  time.Duration // 收到取消后的清理耗时
 }
 
 func (s *stubMonitorSvc) ListEnabledMonitors(_ context.Context) ([]*ChannelMonitor, error) {
@@ -40,6 +43,9 @@ func (s *stubMonitorSvc) RunCheck(ctx context.Context, id int64) ([]*CheckResult
 		case <-time.After(s.runHoldFor):
 		case <-ctx.Done():
 		}
+	}
+	if s.exitDelay > 0 {
+		time.Sleep(s.exitDelay)
 	}
 	return nil, s.runErr
 }
@@ -99,9 +105,9 @@ func TestSchedule_AddsTaskAndFiresOnce(t *testing.T) {
 	r.Stop()
 }
 
-// TestSchedule_ReplaceCancelsOldTask 验证对同一 id 二次 Schedule 会替换旧 task 实例。
-// （旧 goroutine 通过 ctx 取消退出；这里以 task 指针不同 + Stop 不超时作为证据。）
-func TestSchedule_ReplaceCancelsOldTask(t *testing.T) {
+// TestSchedule_UnchangedTaskIsNotRestarted 验证 DB 对账不会重置未变化的任务，
+// 从而避免每次对账都触发一次立即检测。
+func TestSchedule_UnchangedTaskIsNotRestarted(t *testing.T) {
 	svc := &stubMonitorSvc{runCalled: make(chan int64, 8)}
 	r := newRunnerForTest(svc)
 	r.Start()
@@ -118,10 +124,44 @@ func TestSchedule_ReplaceCancelsOldTask(t *testing.T) {
 	if second == nil {
 		t.Fatal("second schedule did not register task")
 	}
-	if first == second {
-		t.Fatal("re-Schedule should create a new scheduledMonitor instance")
+	if first != second {
+		t.Fatal("unchanged re-Schedule should preserve the existing task")
 	}
 
+	stoppedWithin(t, r, 3*time.Second)
+}
+
+func TestSchedule_ChangedIntervalReplacesTask(t *testing.T) {
+	svc := &stubMonitorSvc{runCalled: make(chan int64, 8)}
+	r := newRunnerForTest(svc)
+	r.Start()
+	r.Schedule(&ChannelMonitor{ID: 8, Name: "m8", Enabled: true, IntervalSeconds: 60})
+	first := runnerTaskPtr(r, 8)
+	r.Schedule(&ChannelMonitor{ID: 8, Name: "m8", Enabled: true, IntervalSeconds: 120})
+	second := runnerTaskPtr(r, 8)
+	if first == nil || second == nil || first == second {
+		t.Fatal("changed interval should replace the scheduled task")
+	}
+	stoppedWithin(t, r, 3*time.Second)
+}
+
+func TestReconcileAddsChangesAndRemovesTasks(t *testing.T) {
+	svc := &stubMonitorSvc{enabled: []*ChannelMonitor{
+		{ID: 1, Name: "one", Enabled: true, IntervalSeconds: 60},
+		{ID: 2, Name: "two", Enabled: true, IntervalSeconds: 60},
+	}}
+	r := newRunnerForTest(svc)
+	r.Start()
+	first := runnerTaskPtr(r, 1)
+	svc.enabled = []*ChannelMonitor{
+		{ID: 1, Name: "one", Enabled: true, IntervalSeconds: 120},
+		{ID: 3, Name: "three", Enabled: true, IntervalSeconds: 60},
+	}
+	require.NoError(t, r.reconcile(context.Background()))
+	require.Equal(t, 2, runnerTaskCount(r))
+	require.Nil(t, runnerTaskPtr(r, 2))
+	require.NotNil(t, runnerTaskPtr(r, 3))
+	require.NotSame(t, first, runnerTaskPtr(r, 1))
 	stoppedWithin(t, r, 3*time.Second)
 }
 
@@ -298,11 +338,12 @@ func TestStop_DrainsAllGoroutines(t *testing.T) {
 	stoppedWithin(t, r, 3*time.Second)
 }
 
-// TestStop_WaitsForInFlightCheck 验证 Stop 会等待正在执行的 RunCheck 退出（pool.StopAndWait）。
+// TestStop_WaitsForInFlightCheck 验证 Stop 会取消并等待正在执行的 RunCheck 完成清理。
 func TestStop_WaitsForInFlightCheck(t *testing.T) {
 	svc := &stubMonitorSvc{
 		runCalled:  make(chan int64, 1),
-		runHoldFor: 200 * time.Millisecond,
+		runHoldFor: time.Second,
+		exitDelay:  100 * time.Millisecond,
 	}
 	r := newRunnerForTest(svc)
 	r.Start()
@@ -317,9 +358,12 @@ func TestStop_WaitsForInFlightCheck(t *testing.T) {
 	start := time.Now()
 	stoppedWithin(t, r, 3*time.Second)
 	elapsed := time.Since(start)
-	// Stop 必须等待 in-flight check 跑完（runHoldFor=200ms），耗时下界约 100ms。
-	if elapsed < 100*time.Millisecond {
+	// Stop 应立即取消长任务，但仍等待其 100ms 的退出清理。
+	if elapsed < 80*time.Millisecond {
 		t.Fatalf("Stop returned too fast (%v); did not wait for in-flight check", elapsed)
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("Stop took too long (%v); in-flight context was not canceled", elapsed)
 	}
 }
 

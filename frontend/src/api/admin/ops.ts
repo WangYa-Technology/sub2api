@@ -33,6 +33,7 @@ export interface OpsDashboardOverview {
 
   health_score?: number
 
+  serving_node?: OpsNodeIdentity | null
   system_metrics?: OpsSystemMetricsSnapshot | null
   node_metrics?: OpsNodeMetrics[] | null
   job_heartbeats?: OpsJobHeartbeat[] | null
@@ -66,6 +67,12 @@ export interface OpsDashboardOverview {
 
   duration: OpsPercentiles
   ttft: OpsPercentiles
+}
+
+export interface OpsNodeIdentity {
+  node_id: string
+  region: string
+  hostname: string
 }
 
 export interface OpsPercentiles {

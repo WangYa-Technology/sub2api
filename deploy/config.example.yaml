@@ -763,6 +763,11 @@ api_key_auth_cache:
   # L2 cache TTL (seconds), stored in Redis
   # L2 缓存 TTL（秒），Redis 中存储
   l2_ttl_seconds: 300
+  # Stable identifier shared by every instance using the same Redis data set.
+  # Leave empty to derive it from Redis host/port/db/TLS settings. Set this
+  # explicitly when aliases can refer to the same Redis endpoint.
+  # 使用同一 Redis 数据集的实例填写相同标识；留空时按 Redis 连接信息自动生成。
+  invalidation_scope: ""
   # Negative cache TTL (seconds)
   # 负缓存 TTL（秒）
   negative_ttl_seconds: 30
@@ -789,6 +794,18 @@ api_key_auth_cache:
     # Maximum tracked client identities per process; memory remains bounded.
     # 每进程最多跟踪的客户端身份数量，确保内存有界。
     capacity: 16384
+
+# =============================================================================
+# Global Background Task Leadership
+# 全局后台任务候选节点
+# =============================================================================
+global_background_tasks:
+  # Set true on regions that must serve traffic but must not execute shared-DB
+  # jobs. Keep false on the preferred region; PostgreSQL elects one instance
+  # there during rolling releases.
+  # 非首选区域设为 true，仅保留流量服务；首选区域保持 false，由 PostgreSQL
+  # 在滚动发布期间选出一个后台任务实例。
+  disabled: false
 
 # =============================================================================
 # Dashboard Cache Configuration
@@ -980,6 +997,13 @@ ops:
   # Other detailed settings (cleanup, aggregation, etc.) are configured in ops settings dialog
   # 其他详细设置（数据清理、预聚合等）在运维监控设置对话框中配置
   enabled: true
+  # Stable identity shown in the multi-node Ops view. Configure a unique value
+  # for every application instance connected to the shared database.
+  # 多节点运维视图中的稳定标识；连接共享数据库的每个应用实例应使用唯一值。
+  node_id: ""
+  # Deployment region label, for example japan / taiwan / us.
+  # 部署区域标签，例如 japan / taiwan / us。
+  region: ""
 
 # =============================================================================
 # JWT Configuration

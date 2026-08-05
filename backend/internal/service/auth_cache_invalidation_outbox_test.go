@@ -7,20 +7,26 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/dgraph-io/ristretto"
 	"github.com/stretchr/testify/require"
 )
 
 type authInvalidationRepoStub struct {
-	mu         sync.Mutex
-	events     []AuthCacheInvalidationEvent
-	claimLimit int
-	scheduled  []int64
-	deleted    []int64
-	retried    []int64
-	retryError string
-	stats      AuthCacheInvalidationOutboxStats
-	statsErr   error
+	mu              sync.Mutex
+	events          []AuthCacheInvalidationEvent
+	claimLimit      int
+	scheduled       []int64
+	deleted         []int64
+	retried         []int64
+	retryError      string
+	stats           AuthCacheInvalidationOutboxStats
+	statsErr        error
+	broadcastCursor int64
+	broadcastEvents []AuthCacheInvalidationEvent
+	advanced        []int64
+	consumerScopes  []string
+	cleanupCutoffs  []time.Time
 }
 
 func (r *authInvalidationRepoStub) Claim(_ context.Context, _ string, limit int, _ time.Duration) ([]AuthCacheInvalidationEvent, error) {
@@ -50,6 +56,39 @@ func (r *authInvalidationRepoStub) RetryClaimed(_ context.Context, id int64, _ s
 }
 func (r *authInvalidationRepoStub) Stats(context.Context) (AuthCacheInvalidationOutboxStats, error) {
 	return r.stats, r.statsErr
+}
+func (r *authInvalidationRepoStub) GetBroadcastCursor(_ context.Context, consumerScope string) (int64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.consumerScopes = append(r.consumerScopes, consumerScope)
+	return r.broadcastCursor, nil
+}
+func (r *authInvalidationRepoStub) ListBroadcastEvents(_ context.Context, afterID int64, limit int) ([]AuthCacheInvalidationEvent, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := make([]AuthCacheInvalidationEvent, 0, limit)
+	for _, event := range r.broadcastEvents {
+		if event.ID > afterID && len(result) < limit {
+			result = append(result, event)
+		}
+	}
+	return result, nil
+}
+func (r *authInvalidationRepoStub) AdvanceBroadcastCursor(_ context.Context, consumerScope string, eventID int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.consumerScopes = append(r.consumerScopes, consumerScope)
+	r.advanced = append(r.advanced, eventID)
+	if eventID > r.broadcastCursor {
+		r.broadcastCursor = eventID
+	}
+	return nil
+}
+func (r *authInvalidationRepoStub) DeleteBroadcastEventsBefore(_ context.Context, cutoff time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.cleanupCutoffs = append(r.cleanupCutoffs, cutoff)
+	return nil
 }
 
 type authInvalidationCacheStub struct {
@@ -196,6 +235,37 @@ func TestAuthCacheInvalidationWorker_ProcessesClaimedBatchConcurrently(t *testin
 	require.NoError(t, worker.processBatch(context.Background()))
 	require.Less(t, time.Since(started), time.Second)
 	require.Len(t, repo.deleted, 32)
+}
+
+func TestAuthCacheInvalidationWorker_BroadcastsToIndependentRedisScope(t *testing.T) {
+	repo := &authInvalidationRepoStub{broadcastEvents: []AuthCacheInvalidationEvent{
+		{ID: 11, CacheKey: "hash-a"},
+		{ID: 12, CacheKey: "hash-b"},
+	}}
+	cache := &authInvalidationCacheStub{}
+	worker := NewAuthCacheInvalidationWorker(repo, cache)
+	worker.SetConsumerScope("us-independent-redis")
+	require.NoError(t, worker.processBroadcastBatch(context.Background()))
+	require.Equal(t, []string{"hash-a", "hash-b"}, cache.deleted)
+	require.Equal(t, []string{"hash-a", "hash-b"}, cache.published)
+	require.Equal(t, []int64{11, 12}, repo.advanced)
+	require.Contains(t, repo.consumerScopes, "us-independent-redis")
+}
+
+func TestAuthCacheInvalidationScope_ExplicitAndDerived(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.APIKeyAuth.InvalidationScope = " taiwan-cache "
+	require.Equal(t, "taiwan-cache", authCacheInvalidationScope(cfg))
+
+	cfg.APIKeyAuth.InvalidationScope = ""
+	cfg.Redis.Host = "redis.internal"
+	cfg.Redis.Port = 6379
+	cfg.Redis.DB = 2
+	derived := authCacheInvalidationScope(cfg)
+	require.Regexp(t, `^redis-[0-9a-f]{32}$`, derived)
+	require.Equal(t, derived, authCacheInvalidationScope(cfg))
+	cfg.Redis.DB = 3
+	require.NotEqual(t, derived, authCacheInvalidationScope(cfg))
 }
 
 func TestAuthCacheInvalidationWorker_LifecycleIsManagedAndIdempotent(t *testing.T) {

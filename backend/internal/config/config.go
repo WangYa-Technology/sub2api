@@ -87,6 +87,7 @@ type Config struct {
 	APIKeyAuth              APIKeyAuthCacheConfig         `mapstructure:"api_key_auth_cache"`
 	SubscriptionCache       SubscriptionCacheConfig       `mapstructure:"subscription_cache"`
 	SubscriptionMaintenance SubscriptionMaintenanceConfig `mapstructure:"subscription_maintenance"`
+	GlobalBackgroundTasks   GlobalBackgroundTasksConfig   `mapstructure:"global_background_tasks"`
 	Dashboard               DashboardCacheConfig          `mapstructure:"dashboard_cache"`
 	DashboardAgg            DashboardAggregationConfig    `mapstructure:"dashboard_aggregation"`
 	UsageCleanup            UsageCleanupConfig            `mapstructure:"usage_cleanup"`
@@ -99,6 +100,13 @@ type Config struct {
 	Idempotency             IdempotencyConfig             `mapstructure:"idempotency"`
 	BatchImage              BatchImageConfig              `mapstructure:"batch_image"`
 	ImageStorage            ImageStorageConfig            `mapstructure:"image_storage"`
+}
+
+// GlobalBackgroundTasksConfig controls whether this instance may lead jobs whose
+// effects are shared through the database. Disabled defaults to false so existing
+// single-region and single-instance deployments keep their current behavior.
+type GlobalBackgroundTasksConfig struct {
+	Disabled bool `mapstructure:"disabled"`
 }
 
 type LogConfig struct {
@@ -1466,6 +1474,12 @@ type OpsConfig struct {
 	// This config flag is the "hard switch" for deployments that want to disable ops completely.
 	Enabled bool `mapstructure:"enabled"`
 
+	// NodeID should be stable across restarts and unique within the shared
+	// database. It falls back to the OS hostname when omitted.
+	NodeID string `mapstructure:"node_id"`
+	// Region is an operator-facing label such as japan, taiwan, or us.
+	Region string `mapstructure:"region"`
+
 	// UsePreaggregatedTables prefers ops_metrics_hourly/daily for long-window dashboard queries.
 	UsePreaggregatedTables bool `mapstructure:"use_preaggregated_tables"`
 
@@ -1543,9 +1557,12 @@ type RateLimitConfig struct {
 
 // APIKeyAuthCacheConfig API Key 认证缓存配置
 type APIKeyAuthCacheConfig struct {
-	L1Size             int                    `mapstructure:"l1_size"`
-	L1TTLSeconds       int                    `mapstructure:"l1_ttl_seconds"`
-	L2TTLSeconds       int                    `mapstructure:"l2_ttl_seconds"`
+	L1Size       int `mapstructure:"l1_size"`
+	L1TTLSeconds int `mapstructure:"l1_ttl_seconds"`
+	L2TTLSeconds int `mapstructure:"l2_ttl_seconds"`
+	// InvalidationScope identifies instances backed by the same Redis data set.
+	// Empty derives a stable scope from the Redis connection settings.
+	InvalidationScope  string                 `mapstructure:"invalidation_scope"`
 	NegativeTTLSeconds int                    `mapstructure:"negative_ttl_seconds"`
 	JitterPercent      int                    `mapstructure:"jitter_percent"`
 	Singleflight       bool                   `mapstructure:"singleflight"`
@@ -2024,6 +2041,9 @@ func setDefaults() {
 	viper.SetDefault("database.user_platform_quota_flusher_enabled", false)
 	viper.SetDefault("database.user_platform_quota_flush_interval_ms", 2000)
 	viper.SetDefault("database.user_platform_quota_flush_batch_size", 1000)
+	viper.SetDefault("global_background_tasks.disabled", false)
+	viper.SetDefault("ops.node_id", "")
+	viper.SetDefault("ops.region", "")
 
 	// Redis
 	viper.SetDefault("redis.host", "localhost")
@@ -2156,6 +2176,7 @@ func setDefaults() {
 	viper.SetDefault("api_key_auth_cache.l1_size", 65535)
 	viper.SetDefault("api_key_auth_cache.l1_ttl_seconds", 15)
 	viper.SetDefault("api_key_auth_cache.l2_ttl_seconds", 300)
+	viper.SetDefault("api_key_auth_cache.invalidation_scope", "")
 	viper.SetDefault("api_key_auth_cache.negative_ttl_seconds", 30)
 	viper.SetDefault("api_key_auth_cache.jitter_percent", 10)
 	viper.SetDefault("api_key_auth_cache.singleflight", true)
@@ -2526,6 +2547,9 @@ func (c *Config) Validate() error {
 		if c.APIKeyAuth.InvalidAbuse.Capacity < 256 || c.APIKeyAuth.InvalidAbuse.Capacity > 1_000_000 {
 			return fmt.Errorf("api_key_auth_cache.invalid_abuse.capacity must be between 256 and 1000000")
 		}
+	}
+	if len(strings.TrimSpace(c.APIKeyAuth.InvalidationScope)) > 200 {
+		return fmt.Errorf("api_key_auth_cache.invalidation_scope must not exceed 200 bytes")
 	}
 	jwtSecret := strings.TrimSpace(c.JWT.Secret)
 	if jwtSecret == "" {

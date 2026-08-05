@@ -2,23 +2,29 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/google/uuid"
 )
 
 const (
-	authInvalidationBatchSize    = 100
-	authInvalidationPollInterval = 500 * time.Millisecond
-	authInvalidationLease        = 30 * time.Second
-	authInvalidationRedisTimeout = 2 * time.Second
-	authInvalidationSafetyDelay  = 30 * time.Second
-	authInvalidationConcurrency  = 16
+	authInvalidationBatchSize      = 100
+	authInvalidationPollInterval   = 500 * time.Millisecond
+	authInvalidationLease          = 30 * time.Second
+	authInvalidationRedisTimeout   = 2 * time.Second
+	authInvalidationSafetyDelay    = 30 * time.Second
+	authInvalidationConcurrency    = 16
+	authInvalidationEventRetention = 24 * time.Hour
 )
 
 type AuthCacheInvalidationEvent struct {
@@ -42,6 +48,10 @@ type AuthCacheInvalidationOutboxRepository interface {
 	ScheduleSecondPass(ctx context.Context, id int64, workerID string, availableAt time.Time) error
 	RetryClaimed(ctx context.Context, id int64, workerID string, availableAt time.Time, lastError string) error
 	Stats(ctx context.Context) (AuthCacheInvalidationOutboxStats, error)
+	GetBroadcastCursor(ctx context.Context, consumerScope string) (int64, error)
+	ListBroadcastEvents(ctx context.Context, afterID int64, limit int) ([]AuthCacheInvalidationEvent, error)
+	AdvanceBroadcastCursor(ctx context.Context, consumerScope string, eventID int64) error
+	DeleteBroadcastEventsBefore(ctx context.Context, cutoff time.Time) error
 }
 
 type AuthCacheInvalidationHealth struct {
@@ -83,31 +93,42 @@ func (s *OpsService) GetAuthCacheInvalidationHealth(ctx context.Context) OpsAuth
 }
 
 type AuthCacheInvalidationWorker struct {
-	repo      AuthCacheInvalidationOutboxRepository
-	cache     APIKeyCache
-	local     *APIKeyService
-	workerID  string
-	ctx       context.Context
-	cancel    context.CancelFunc
-	wg        sync.WaitGroup
-	start     sync.Once
-	stop      sync.Once
-	running   atomic.Bool
-	processed atomic.Uint64
-	failures  atomic.Uint64
-	lastError atomic.Value
+	repo                 AuthCacheInvalidationOutboxRepository
+	cache                APIKeyCache
+	local                *APIKeyService
+	workerID             string
+	consumerScope        string
+	ctx                  context.Context
+	cancel               context.CancelFunc
+	wg                   sync.WaitGroup
+	start                sync.Once
+	stop                 sync.Once
+	running              atomic.Bool
+	processed            atomic.Uint64
+	failures             atomic.Uint64
+	lastError            atomic.Value
+	lastBroadcastCleanup atomic.Int64
 }
 
 func NewAuthCacheInvalidationWorker(repo AuthCacheInvalidationOutboxRepository, cache APIKeyCache, local ...*APIKeyService) *AuthCacheInvalidationWorker {
 	ctx, cancel := context.WithCancel(context.Background())
 	w := &AuthCacheInvalidationWorker{
-		repo: repo, cache: cache, workerID: uuid.NewString(), ctx: ctx, cancel: cancel,
+		repo: repo, cache: cache, workerID: uuid.NewString(), consumerScope: "default", ctx: ctx, cancel: cancel,
 	}
 	if len(local) > 0 {
 		w.local = local[0]
 	}
 	w.lastError.Store("")
 	return w
+}
+
+func (w *AuthCacheInvalidationWorker) SetConsumerScope(scope string) {
+	if w == nil {
+		return
+	}
+	if scope = strings.TrimSpace(scope); scope != "" {
+		w.consumerScope = scope
+	}
 }
 
 func (w *AuthCacheInvalidationWorker) Start() {
@@ -138,6 +159,9 @@ func (w *AuthCacheInvalidationWorker) run() {
 	ticker := time.NewTicker(authInvalidationPollInterval)
 	defer ticker.Stop()
 	for {
+		if err := w.processBroadcastBatch(w.ctx); err != nil && w.ctx.Err() == nil {
+			w.recordFailure(err)
+		}
 		if err := w.processBatch(w.ctx); err != nil && w.ctx.Err() == nil {
 			w.recordFailure(err)
 		}
@@ -147,6 +171,47 @@ func (w *AuthCacheInvalidationWorker) run() {
 		case <-ticker.C:
 		}
 	}
+}
+
+func (w *AuthCacheInvalidationWorker) processBroadcastBatch(ctx context.Context) error {
+	cursor, err := w.repo.GetBroadcastCursor(ctx, w.consumerScope)
+	if err != nil {
+		return fmt.Errorf("load auth invalidation cursor for %s: %w", w.consumerScope, err)
+	}
+	events, err := w.repo.ListBroadcastEvents(ctx, cursor, authInvalidationBatchSize)
+	if err != nil {
+		return fmt.Errorf("list auth invalidation events for %s: %w", w.consumerScope, err)
+	}
+	for _, event := range events {
+		if w.local != nil {
+			w.local.invalidateLocalAuthCache(event.CacheKey)
+		}
+		invalidateCtx, cancel := context.WithTimeout(ctx, authInvalidationRedisTimeout)
+		err = w.cache.DeleteAuthCache(invalidateCtx, event.CacheKey)
+		if err == nil {
+			err = w.cache.PublishAuthCacheInvalidation(invalidateCtx, event.CacheKey)
+		}
+		cancel()
+		if err != nil {
+			return fmt.Errorf("invalidate auth cache event %d for %s: %w", event.ID, w.consumerScope, err)
+		}
+		if err := w.repo.AdvanceBroadcastCursor(ctx, w.consumerScope, event.ID); err != nil {
+			return fmt.Errorf("advance auth invalidation cursor for %s: %w", w.consumerScope, err)
+		}
+		w.processed.Add(1)
+		cursor = event.ID
+	}
+
+	// Every worker may attempt this bounded retention cleanup; the timestamp keeps
+	// it to at most once per process per hour and the SQL is idempotent.
+	now := time.Now().UTC()
+	lastCleanup := time.Unix(w.lastBroadcastCleanup.Load(), 0)
+	if now.Sub(lastCleanup) >= time.Hour && w.lastBroadcastCleanup.CompareAndSwap(lastCleanup.Unix(), now.Unix()) {
+		if err := w.repo.DeleteBroadcastEventsBefore(ctx, now.Add(-authInvalidationEventRetention)); err != nil {
+			return fmt.Errorf("clean old auth invalidation events: %w", err)
+		}
+	}
+	return nil
 }
 
 func (w *AuthCacheInvalidationWorker) processBatch(ctx context.Context) error {
@@ -286,8 +351,23 @@ func (w *AuthCacheInvalidationWorker) Health(ctx context.Context) AuthCacheInval
 	return health
 }
 
-func ProvideAuthCacheInvalidationWorker(repo AuthCacheInvalidationOutboxRepository, cache APIKeyCache, apiKeyService *APIKeyService) *AuthCacheInvalidationWorker {
+func authCacheInvalidationScope(cfg *config.Config) string {
+	if cfg == nil {
+		return "default"
+	}
+	if explicit := strings.TrimSpace(cfg.APIKeyAuth.InvalidationScope); explicit != "" {
+		return explicit
+	}
+	identity := strings.ToLower(strings.TrimSpace(cfg.Redis.Host)) + ":" + strconv.Itoa(cfg.Redis.Port) +
+		"/" + strconv.Itoa(cfg.Redis.DB) + "/" + strings.ToLower(strings.TrimSpace(cfg.Redis.Username)) +
+		"/tls=" + strconv.FormatBool(cfg.Redis.EnableTLS)
+	sum := sha256.Sum256([]byte(identity))
+	return "redis-" + hex.EncodeToString(sum[:16])
+}
+
+func ProvideAuthCacheInvalidationWorker(repo AuthCacheInvalidationOutboxRepository, cache APIKeyCache, apiKeyService *APIKeyService, cfg *config.Config) *AuthCacheInvalidationWorker {
 	worker := NewAuthCacheInvalidationWorker(repo, cache, apiKeyService)
+	worker.SetConsumerScope(authCacheInvalidationScope(cfg))
 	worker.Start()
 	return worker
 }

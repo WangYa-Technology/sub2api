@@ -255,6 +255,7 @@ func ProvideGrokTokenProvider(
 // ProvideDashboardAggregationService 创建并启动仪表盘聚合服务
 func ProvideDashboardAggregationService(repo DashboardAggregationRepository, timingWheel *TimingWheelService, lockCache LeaderLockCache, db *sql.DB, cfg *config.Config) *DashboardAggregationService {
 	svc := NewDashboardAggregationService(repo, timingWheel, cfg)
+	applyGlobalBackgroundTaskEligibility(&svc.instanceID, cfg)
 	svc.SetLeaderLock(lockCache, db)
 	svc.Start()
 	return svc
@@ -282,8 +283,9 @@ func ProvideProxyExpiryService(proxyRepo ProxyRepository) *ProxyExpiryService {
 }
 
 // ProvideSubscriptionExpiryService creates and starts SubscriptionExpiryService.
-func ProvideSubscriptionExpiryService(userSubRepo UserSubscriptionRepository, settingRepo SettingRepository, notificationEmailService *NotificationEmailService, lockCache LeaderLockCache, db *sql.DB) *SubscriptionExpiryService {
+func ProvideSubscriptionExpiryService(userSubRepo UserSubscriptionRepository, settingRepo SettingRepository, notificationEmailService *NotificationEmailService, lockCache LeaderLockCache, db *sql.DB, cfg *config.Config) *SubscriptionExpiryService {
 	svc := NewSubscriptionExpiryService(userSubRepo, time.Minute)
+	applyGlobalBackgroundTaskEligibility(&svc.instanceID, cfg)
 	svc.SetSettingRepository(settingRepo)
 	svc.SetNotificationEmailService(notificationEmailService)
 	svc.SetLeaderLock(lockCache, db)
@@ -311,9 +313,7 @@ func ProvideDeferredService(accountRepo AccountRepository, timingWheel *TimingWh
 // ProvideConcurrencyService creates ConcurrencyService and starts slot cleanup worker.
 func ProvideConcurrencyService(cache ConcurrencyCache, accountRepo AccountRepository, cfg *config.Config) *ConcurrencyService {
 	svc := NewConcurrencyService(cache)
-	if err := svc.CleanupStaleProcessSlots(context.Background()); err != nil {
-		logger.LegacyPrintf("service.concurrency", "Warning: startup cleanup stale process slots failed: %v", err)
-	}
+	svc.StartProcessHeartbeat()
 	if cfg != nil {
 		svc.SetAccountLoadBatchCacheTTL(time.Duration(cfg.Gateway.Scheduling.LoadBatchCacheTTLMS) * time.Millisecond)
 		svc.StartSlotCleanupWorker(accountRepo, cfg.Gateway.Scheduling.SlotCleanupInterval)
@@ -372,8 +372,10 @@ func ProvideOpsMetricsCollector(
 	db *sql.DB,
 	redisClient *redis.Client,
 	cfg *config.Config,
+	buildInfo BuildInfo,
 ) *OpsMetricsCollector {
-	collector := NewOpsMetricsCollector(opsRepo, settingRepo, accountRepo, concurrencyService, db, redisClient, cfg)
+	collector := NewOpsMetricsCollector(opsRepo, settingRepo, accountRepo, concurrencyService, db, redisClient, cfg, buildInfo)
+	applyGlobalBackgroundTaskEligibility(&collector.instanceID, cfg)
 	collector.Start()
 	return collector
 }
@@ -387,6 +389,7 @@ func ProvideOpsAggregationService(
 	cfg *config.Config,
 ) *OpsAggregationService {
 	svc := NewOpsAggregationService(opsRepo, settingRepo, db, redisClient, cfg)
+	applyGlobalBackgroundTaskEligibility(&svc.instanceID, cfg)
 	svc.Start()
 	return svc
 }
@@ -397,10 +400,12 @@ func ProvideOpsAlertEvaluatorService(
 	opsRepo OpsRepository,
 	emailService *EmailService,
 	redisClient *redis.Client,
+	db *sql.DB,
 	cfg *config.Config,
 	proxyRepo ProxyRepository,
 ) *OpsAlertEvaluatorService {
-	svc := NewOpsAlertEvaluatorService(opsService, opsRepo, emailService, redisClient, cfg, proxyRepo)
+	svc := NewOpsAlertEvaluatorService(opsService, opsRepo, emailService, redisClient, db, cfg, proxyRepo)
+	applyGlobalBackgroundTaskEligibility(&svc.instanceID, cfg)
 	svc.Start()
 	return svc
 }
@@ -420,6 +425,7 @@ func ProvideOpsCleanupService(
 	opsService *OpsService,
 ) *OpsCleanupService {
 	svc := NewOpsCleanupService(opsRepo, db, redisClient, cfg, channelMonitorSvc, settingRepo)
+	applyGlobalBackgroundTaskEligibility(&svc.instanceID, cfg)
 	svc.Start()
 	if opsService != nil {
 		opsService.SetCleanupReloader(svc)
@@ -495,9 +501,13 @@ func ProvideScheduledTestRunnerService(
 	scheduledSvc *ScheduledTestService,
 	accountTestSvc *AccountTestService,
 	rateLimitSvc *RateLimitService,
+	lockCache LeaderLockCache,
+	db *sql.DB,
 	cfg *config.Config,
 ) *ScheduledTestRunnerService {
 	svc := NewScheduledTestRunnerService(planRepo, scheduledSvc, accountTestSvc, rateLimitSvc, cfg)
+	applyGlobalBackgroundTaskEligibility(&svc.instanceID, cfg)
+	svc.SetLeaderLock(lockCache, db)
 	svc.Start()
 	return svc
 }
@@ -508,9 +518,11 @@ func ProvideOpsScheduledReportService(
 	userService *UserService,
 	emailService *EmailService,
 	redisClient *redis.Client,
+	db *sql.DB,
 	cfg *config.Config,
 ) *OpsScheduledReportService {
-	svc := NewOpsScheduledReportService(opsService, userService, emailService, redisClient, cfg)
+	svc := NewOpsScheduledReportService(opsService, userService, emailService, redisClient, db, cfg)
+	applyGlobalBackgroundTaskEligibility(&svc.instanceID, cfg)
 	svc.Start()
 	return svc
 }
@@ -558,8 +570,12 @@ func ProvideBackupService(
 	encryptor SecretEncryptor,
 	storeFactory BackupObjectStoreFactory,
 	dumper DBDumper,
+	lockCache LeaderLockCache,
+	db *sql.DB,
 ) *BackupService {
 	svc := NewBackupService(settingRepo, cfg, encryptor, storeFactory, dumper)
+	applyGlobalBackgroundTaskEligibility(&svc.instanceID, cfg)
+	svc.SetLeaderLock(lockCache, db)
 	svc.Start()
 	return svc
 }
@@ -818,8 +834,9 @@ func ProvidePaymentService(entClient *dbent.Client, registry *payment.Registry, 
 }
 
 // ProvidePaymentOrderExpiryService creates and starts PaymentOrderExpiryService.
-func ProvidePaymentOrderExpiryService(paymentSvc *PaymentService, lockCache LeaderLockCache, db *sql.DB) *PaymentOrderExpiryService {
+func ProvidePaymentOrderExpiryService(paymentSvc *PaymentService, lockCache LeaderLockCache, db *sql.DB, cfg *config.Config) *PaymentOrderExpiryService {
 	svc := NewPaymentOrderExpiryService(paymentSvc, 60*time.Second)
+	applyGlobalBackgroundTaskEligibility(&svc.instanceID, cfg)
 	svc.SetLeaderLock(lockCache, db)
 	svc.Start()
 	return svc

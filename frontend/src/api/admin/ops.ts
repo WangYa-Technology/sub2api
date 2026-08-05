@@ -34,6 +34,7 @@ export interface OpsDashboardOverview {
   health_score?: number
 
   system_metrics?: OpsSystemMetricsSnapshot | null
+  node_metrics?: OpsNodeMetrics[] | null
   job_heartbeats?: OpsJobHeartbeat[] | null
 
   success_count: number
@@ -248,6 +249,9 @@ export interface OpsSystemMetricsSnapshot {
   id: number
   created_at: string
   window_minutes: number
+  source_node_id?: string | null
+  source_region?: string | null
+  source_hostname?: string | null
 
   cpu_usage_percent?: number | null
   memory_used_mb?: number | null
@@ -271,6 +275,34 @@ export interface OpsSystemMetricsSnapshot {
   goroutine_count?: number | null
   concurrency_queue_depth?: number | null
   account_switch_count?: number | null
+}
+
+export interface OpsNodeMetrics {
+  node_id: string
+  region: string
+  hostname: string
+  version: string
+  started_at: string
+  last_seen_at: string
+  online: boolean
+  report_interval_seconds: number
+
+  cpu_usage_percent?: number | null
+  memory_used_mb?: number | null
+  memory_total_mb?: number | null
+  memory_usage_percent?: number | null
+  db_ok?: boolean | null
+  redis_ok?: boolean | null
+  db_conn_active?: number | null
+  db_conn_idle?: number | null
+  db_conn_waiting?: number | null
+  db_max_open_conns?: number | null
+  redis_conn_total?: number | null
+  redis_conn_idle?: number | null
+  redis_pool_size?: number | null
+  goroutine_count?: number | null
+  concurrency_queue_depth?: number | null
+  background_tasks_disabled: boolean
 }
 
 export interface OpsJobHeartbeat {

@@ -10,6 +10,11 @@ import (
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
 
+const (
+	opsNodeMetricsLookback     = 24 * time.Hour
+	opsNodeMinimumOnlineWindow = 3 * time.Minute
+)
+
 func (s *OpsService) GetDashboardOverview(ctx context.Context, filter *OpsDashboardFilter) (*OpsDashboardOverview, error) {
 	if err := s.RequireMonitoringEnabled(ctx); err != nil {
 		return nil, err
@@ -59,15 +64,39 @@ func (s *OpsService) GetDashboardOverview(ctx context.Context, filter *OpsDashbo
 		log.Printf("[Ops] GetLatestSystemMetrics failed: %v", err)
 	}
 
+	now := time.Now().UTC()
+	if nodes, err := s.opsRepo.ListNodeMetrics(ctx, now.Add(-opsNodeMetricsLookback)); err == nil {
+		for _, node := range nodes {
+			if node == nil {
+				continue
+			}
+			node.Online = opsNodeIsOnline(now, node)
+		}
+		overview.NodeMetrics = nodes
+	} else {
+		log.Printf("[Ops] ListNodeMetrics failed: %v", err)
+	}
+
 	if heartbeats, err := s.opsRepo.ListJobHeartbeats(ctx); err == nil {
 		overview.JobHeartbeats = heartbeats
 	} else {
 		log.Printf("[Ops] ListJobHeartbeats failed: %v", err)
 	}
 
-	overview.HealthScore = computeDashboardHealthScore(time.Now().UTC(), overview)
+	overview.HealthScore = computeDashboardHealthScore(now, overview)
 
 	return overview, nil
+}
+
+func opsNodeIsOnline(now time.Time, node *OpsNodeMetrics) bool {
+	if node == nil || node.LastSeenAt.IsZero() {
+		return false
+	}
+	onlineWindow := time.Duration(node.ReportIntervalSeconds*2)*time.Second + 30*time.Second
+	if onlineWindow < opsNodeMinimumOnlineWindow {
+		onlineWindow = opsNodeMinimumOnlineWindow
+	}
+	return now.Sub(node.LastSeenAt) <= onlineWindow
 }
 
 func (s *OpsService) resolveOpsQueryMode(ctx context.Context, requested OpsQueryMode) OpsQueryMode {

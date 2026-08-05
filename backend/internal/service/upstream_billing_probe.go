@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
@@ -303,8 +304,10 @@ func ProvideUpstreamBillingProbeService(
 	settingService *SettingService,
 	lockCache LeaderLockCache,
 	db *sql.DB,
+	cfg *config.Config,
 ) *UpstreamBillingProbeService {
 	svc := NewUpstreamBillingProbeService(accountRepo, accountTestService, settingService)
+	applyGlobalBackgroundTaskEligibility(&svc.instanceID, cfg)
 	svc.SetLeaderLock(lockCache, db)
 	svc.Start()
 	return svc
@@ -395,15 +398,20 @@ func (s *UpstreamBillingProbeService) RunDue(ctx context.Context) error {
 	}
 	defer runRelease()
 
-	lockNow := time.Now()
-	cadenceRelease, acquired, lockErr := s.tryAcquireLeaderLock(ctx, upstreamBillingProbeLeaderLockKeyAt(lockNow))
-	if lockErr != nil {
-		return fmt.Errorf("acquire upstream billing probe cadence lock: %w", lockErr)
+	// Redis-only deployments need a cadence bucket because their leader lock is
+	// released after each run. PostgreSQL leadership is persistent, so creating a
+	// new session advisory lock for every bucket would leak reserved connections.
+	if s.db == nil {
+		lockNow := time.Now()
+		cadenceRelease, acquired, lockErr := s.tryAcquireLeaderLock(ctx, upstreamBillingProbeLeaderLockKeyAt(lockNow))
+		if lockErr != nil {
+			return fmt.Errorf("acquire upstream billing probe cadence lock: %w", lockErr)
+		}
+		if !acquired {
+			return nil
+		}
+		defer releaseUpstreamBillingProbeLeaderLock(cadenceRelease, lockNow.Truncate(upstreamBillingProbeCycleInterval).Add(upstreamBillingProbeCycleInterval))
 	}
-	if !acquired {
-		return nil
-	}
-	defer releaseUpstreamBillingProbeLeaderLock(cadenceRelease, lockNow.Truncate(upstreamBillingProbeCycleInterval).Add(upstreamBillingProbeCycleInterval))
 
 	now := s.currentTime()
 	accounts, err := s.listDueAccounts(ctx, now)
@@ -586,24 +594,7 @@ func upstreamBillingProbeLeaderLockKeyAt(now time.Time) string {
 func (s *UpstreamBillingProbeService) tryAcquireLeaderLock(ctx context.Context, key string) (func(), bool, error) {
 	lockCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	if s.lockCache != nil {
-		acquired, err := s.lockCache.TryAcquireLeaderLock(lockCtx, key, s.instanceID, upstreamBillingProbeLeaderLockTTL)
-		if err != nil {
-			return nil, false, err
-		}
-		if !acquired {
-			return nil, false, nil
-		}
-		return func() {
-			releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer releaseCancel()
-			_ = s.lockCache.ReleaseLeaderLock(releaseCtx, key, s.instanceID)
-		}, true, nil
-	}
-	if s.db != nil {
-		return tryAcquireDBAdvisoryLockWithError(lockCtx, s.db, hashAdvisoryLockID(key))
-	}
-	return func() {}, true, nil
+	return tryAcquireSingletonLeaderLockWithError(lockCtx, s.lockCache, s.db, key, s.instanceID, upstreamBillingProbeLeaderLockTTL)
 }
 
 func releaseUpstreamBillingProbeLeaderLock(release func(), releaseAt time.Time) {

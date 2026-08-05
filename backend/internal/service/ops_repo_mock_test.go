@@ -13,6 +13,8 @@ type opsRepoMock struct {
 	ListSystemLogsFn              func(ctx context.Context, filter *OpsSystemLogFilter) (*OpsSystemLogList, error)
 	DeleteSystemLogsFn            func(ctx context.Context, filter *OpsSystemLogCleanupFilter) (int64, error)
 	InsertSystemLogCleanupAuditFn func(ctx context.Context, input *OpsSystemLogCleanupAudit) error
+	InsertSystemMetricsFn         func(ctx context.Context, input *OpsInsertSystemMetricsInput) error
+	UpsertNodeMetricsFn           func(ctx context.Context, input *OpsNodeMetrics) error
 }
 
 func (m *opsRepoMock) InsertErrorLog(ctx context.Context, input *OpsInsertErrorLogInput) (int64, error) {
@@ -106,11 +108,25 @@ func (m *opsRepoMock) GetOpenAITokenStats(ctx context.Context, filter *OpsOpenAI
 }
 
 func (m *opsRepoMock) InsertSystemMetrics(ctx context.Context, input *OpsInsertSystemMetricsInput) error {
+	if m.InsertSystemMetricsFn != nil {
+		return m.InsertSystemMetricsFn(ctx, input)
+	}
 	return nil
 }
 
 func (m *opsRepoMock) GetLatestSystemMetrics(ctx context.Context, windowMinutes int) (*OpsSystemMetricsSnapshot, error) {
 	return &OpsSystemMetricsSnapshot{}, nil
+}
+
+func (m *opsRepoMock) UpsertNodeMetrics(ctx context.Context, input *OpsNodeMetrics) error {
+	if m.UpsertNodeMetricsFn != nil {
+		return m.UpsertNodeMetricsFn(ctx, input)
+	}
+	return nil
+}
+
+func (m *opsRepoMock) ListNodeMetrics(ctx context.Context, seenSince time.Time) ([]*OpsNodeMetrics, error) {
+	return []*OpsNodeMetrics{}, nil
 }
 
 func (m *opsRepoMock) UpsertJobHeartbeat(ctx context.Context, input *OpsUpsertJobHeartbeatInput) error {

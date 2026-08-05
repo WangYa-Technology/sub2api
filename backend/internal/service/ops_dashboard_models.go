@@ -41,6 +41,8 @@ type OpsDashboardOverview struct {
 
 	// Latest system-level snapshot (window=1m, global).
 	SystemMetrics *OpsSystemMetricsSnapshot `json:"system_metrics"`
+	// Latest per-node runtime snapshots reported through the shared database.
+	NodeMetrics []*OpsNodeMetrics `json:"node_metrics"`
 
 	// Background jobs health (heartbeats).
 	JobHeartbeats []*OpsJobHeartbeat `json:"job_heartbeats"`

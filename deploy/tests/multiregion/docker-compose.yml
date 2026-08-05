@@ -1,0 +1,191 @@
+x-app-environment: &app-environment
+  AUTO_SETUP: "true"
+  SERVER_HOST: 0.0.0.0
+  SERVER_PORT: "8080"
+  SERVER_MODE: release
+  DATABASE_HOST: postgres
+  DATABASE_PORT: "5432"
+  DATABASE_USER: sub2api
+  DATABASE_PASSWORD: multiregion-postgres-test
+  DATABASE_DBNAME: sub2api
+  DATABASE_SSLMODE: disable
+  DATABASE_MAX_OPEN_CONNS: "20"
+  DATABASE_MAX_IDLE_CONNS: "5"
+  REDIS_PORT: "6379"
+  REDIS_DB: "0"
+  REDIS_POOL_SIZE: "32"
+  REDIS_MIN_IDLE_CONNS: "2"
+  ADMIN_EMAIL: multiregion-admin@sub2api.test
+  ADMIN_PASSWORD: MultiregionAdminTest123!
+  JWT_SECRET: multiregion-test-jwt-secret-at-least-32-bytes
+  TOTP_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+  SETUP_MIGRATION_TIMEOUT_SECONDS: "180"
+  OPS_ENABLED: "true"
+  TZ: Asia/Shanghai
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: sub2api
+      POSTGRES_PASSWORD: multiregion-postgres-test
+      POSTGRES_DB: sub2api
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sub2api -d sub2api"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks: [db-plane]
+
+  redis-japan:
+    image: redis:8-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks: [japan-cache]
+
+  redis-us:
+    image: redis:8-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks: [us-cache]
+
+  redis-taiwan:
+    image: redis:8-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks: [taiwan-cache]
+
+  jp-01:
+    build: &app-build
+      context: ../../..
+      dockerfile: Dockerfile
+      args:
+        VERSION: multiregion-test
+    image: sub2api-multiregion-test:local
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-japan:
+        condition: service_healthy
+    environment:
+      <<: *app-environment
+      REDIS_HOST: redis-japan
+      OPS_NODE_ID: jp-01
+      OPS_REGION: japan
+      API_KEY_AUTH_CACHE_INVALIDATION_SCOPE: japan-shared-redis
+      GLOBAL_BACKGROUND_TASKS_DISABLED: "false"
+    volumes: [jp-01-data:/app/data]
+    ports: ["127.0.0.1::8080"]
+    networks: [db-plane, japan-cache, ingress]
+    healthcheck: &app-healthcheck
+      test: ["CMD", "wget", "-q", "-T", "3", "-O", "/dev/null", "http://127.0.0.1:8080/health"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+      start_period: 10s
+
+  jp-02:
+    build: *app-build
+    image: sub2api-multiregion-test:local
+    environment:
+      <<: *app-environment
+      REDIS_HOST: redis-japan
+      OPS_NODE_ID: jp-02
+      OPS_REGION: japan
+      API_KEY_AUTH_CACHE_INVALIDATION_SCOPE: japan-shared-redis
+      GLOBAL_BACKGROUND_TASKS_DISABLED: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-japan:
+        condition: service_healthy
+    volumes: [jp-02-data:/app/data]
+    ports: ["127.0.0.1::8080"]
+    networks: [db-plane, japan-cache, ingress]
+    healthcheck: *app-healthcheck
+
+  us-01:
+    build: *app-build
+    image: sub2api-multiregion-test:local
+    environment:
+      <<: *app-environment
+      REDIS_HOST: redis-us
+      OPS_NODE_ID: us-01
+      OPS_REGION: us
+      API_KEY_AUTH_CACHE_INVALIDATION_SCOPE: us-independent-redis
+      GLOBAL_BACKGROUND_TASKS_DISABLED: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-us:
+        condition: service_healthy
+    volumes: [us-01-data:/app/data]
+    ports: ["127.0.0.1::8080"]
+    networks: [db-plane, us-cache, ingress]
+    healthcheck: *app-healthcheck
+
+  tw-01:
+    build: *app-build
+    image: sub2api-multiregion-test:local
+    environment:
+      <<: *app-environment
+      REDIS_HOST: redis-taiwan
+      OPS_NODE_ID: tw-01
+      OPS_REGION: taiwan
+      API_KEY_AUTH_CACHE_INVALIDATION_SCOPE: taiwan-independent-redis
+      GLOBAL_BACKGROUND_TASKS_DISABLED: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-taiwan:
+        condition: service_healthy
+    volumes: [tw-01-data:/app/data]
+    ports: ["127.0.0.1::8080"]
+    networks: [db-plane, taiwan-cache, ingress]
+    healthcheck: *app-healthcheck
+
+  ingress:
+    image: nginx:1.29-alpine
+    depends_on:
+      jp-01:
+        condition: service_healthy
+      jp-02:
+        condition: service_healthy
+      us-01:
+        condition: service_healthy
+      tw-01:
+        condition: service_healthy
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    ports: ["127.0.0.1::8080"]
+    networks: [ingress]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-T", "3", "-O", "/dev/null", "http://127.0.0.1:8080/health"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+networks:
+  db-plane:
+  japan-cache:
+  us-cache:
+  taiwan-cache:
+  ingress:
+
+volumes:
+  jp-01-data:
+  jp-02-data:
+  us-01-data:
+  tw-01-data:

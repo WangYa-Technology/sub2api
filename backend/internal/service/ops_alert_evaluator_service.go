@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"math"
 	"strconv"
@@ -39,6 +40,7 @@ type OpsAlertEvaluatorService struct {
 	proxyRepo    ProxyRepository
 
 	redisClient *redis.Client
+	db          *sql.DB
 	cfg         *config.Config
 	instanceID  string
 
@@ -71,6 +73,7 @@ func NewOpsAlertEvaluatorService(
 	opsRepo OpsRepository,
 	emailService *EmailService,
 	redisClient *redis.Client,
+	db *sql.DB,
 	cfg *config.Config,
 	proxyRepo ProxyRepository,
 ) *OpsAlertEvaluatorService {
@@ -80,6 +83,7 @@ func NewOpsAlertEvaluatorService(
 		emailService:              emailService,
 		proxyRepo:                 proxyRepo,
 		redisClient:               redisClient,
+		db:                        db,
 		cfg:                       cfg,
 		instanceID:                uuid.NewString(),
 		ruleStates:                map[int64]*opsAlertRuleState{},
@@ -1471,13 +1475,10 @@ func isOpsAlertSilenced(now time.Time, rule *OpsAlertRule, event *OpsAlertEvent,
 }
 
 func (s *OpsAlertEvaluatorService) tryAcquireLeaderLock(ctx context.Context, lock OpsDistributedLockSettings) (func(), bool) {
-	if !lock.Enabled {
-		return nil, true
+	if s == nil || !backgroundTaskLeaderEligible(s.instanceID) {
+		return nil, false
 	}
-	if s.redisClient == nil {
-		s.warnNoRedisOnce.Do(func() {
-			logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] redis not configured; running without distributed lock")
-		})
+	if !lock.Enabled {
 		return nil, true
 	}
 	key := strings.TrimSpace(lock.Key)
@@ -1487,6 +1488,19 @@ func (s *OpsAlertEvaluatorService) tryAcquireLeaderLock(ctx context.Context, loc
 	ttl := time.Duration(lock.TTLSeconds) * time.Second
 	if ttl <= 0 {
 		ttl = opsAlertEvaluatorLeaderLockTTL
+	}
+	if s.db != nil {
+		release, ok, _ := tryAcquirePersistentDBAdvisoryLock(ctx, s.db, hashAdvisoryLockID(key), s.instanceID)
+		if !ok {
+			s.maybeLogSkip(key)
+		}
+		return release, ok
+	}
+	if s.redisClient == nil {
+		s.warnNoRedisOnce.Do(func() {
+			logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] no distributed lock backend; running without lock")
+		})
+		return func() {}, true
 	}
 
 	ok, err := s.redisClient.SetNX(ctx, key, s.instanceID, ttl).Result()

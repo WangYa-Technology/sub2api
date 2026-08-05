@@ -99,6 +99,42 @@ func TestAuthCacheInvalidationOutboxRepository_StatsExposeDurableLagAndFailures(
 	require.NotNil(t, stats.OldestCreatedAt)
 }
 
+func TestAuthCacheInvalidationOutboxRepository_BroadcastCursorLifecycle(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	repo := NewAuthCacheInvalidationOutboxRepository(db)
+
+	mock.ExpectQuery("(?s)INSERT INTO auth_cache_invalidation_consumers.*RETURNING last_event_id").
+		WithArgs("us-cache").
+		WillReturnRows(sqlmock.NewRows([]string{"last_event_id"}).AddRow(int64(7)))
+	cursor, err := repo.GetBroadcastCursor(context.Background(), "us-cache")
+	require.NoError(t, err)
+	require.Equal(t, int64(7), cursor)
+
+	created := time.Now().UTC()
+	mock.ExpectQuery("(?s)FROM auth_cache_invalidation_events.*WHERE id > \\$1.*LIMIT \\$2").
+		WithArgs(int64(7), 100).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "cache_key", "created_at"}).
+			AddRow(int64(8), strings.Repeat("b", 64), created))
+	events, err := repo.ListBroadcastEvents(context.Background(), 7, 0)
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	require.Equal(t, int64(8), events[0].ID)
+
+	mock.ExpectExec("UPDATE auth_cache_invalidation_consumers").
+		WithArgs("us-cache", int64(8)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	require.NoError(t, repo.AdvanceBroadcastCursor(context.Background(), "us-cache", 8))
+
+	cutoff := created.Add(-24 * time.Hour)
+	mock.ExpectExec("DELETE FROM auth_cache_invalidation_events").
+		WithArgs(cutoff).
+		WillReturnResult(sqlmock.NewResult(0, 2))
+	require.NoError(t, repo.DeleteBroadcastEventsBefore(context.Background(), cutoff))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestAuthCacheInvalidationMigration_SecurityCoverageAndNoPlaintextPayload(t *testing.T) {
 	content, err := migrations.FS.ReadFile("184_auth_cache_invalidation_outbox.sql")
 	require.NoError(t, err)
@@ -120,4 +156,18 @@ func TestAuthCacheInvalidationMigration_SecurityCoverageAndNoPlaintextPayload(t 
 	sum := sha256.Sum256([]byte(plaintext))
 	require.Len(t, hex.EncodeToString(sum[:]), 64)
 	require.NotContains(t, sqlText, plaintext)
+}
+
+func TestAuthCacheInvalidationBroadcastMigration_FanoutAndRollingCompatibility(t *testing.T) {
+	content, err := migrations.FS.ReadFile("195_auth_cache_invalidation_broadcast.sql")
+	require.NoError(t, err)
+	sqlText := string(content)
+	for _, required := range []string{
+		"auth_cache_invalidation_events", "auth_cache_invalidation_consumers",
+		"source_outbox_id", "cache_key", "AFTER INSERT ON auth_cache_invalidation_outbox",
+		"trg_auth_cache_invalidation_event_mirror", "ON CONFLICT (source_outbox_id) DO NOTHING",
+	} {
+		require.Contains(t, sqlText, required)
+	}
+	require.NotContains(t, sqlText, "raw_key")
 }

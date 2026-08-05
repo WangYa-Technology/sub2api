@@ -171,7 +171,7 @@ func (s *helperConcurrencyCacheStub) CleanupExpiredAccountSlotKeys(ctx context.C
 	return nil
 }
 
-func (s *helperConcurrencyCacheStub) CleanupStaleProcessSlots(ctx context.Context, activeRequestPrefix string) error {
+func (s *helperConcurrencyCacheStub) MaintainProcessHeartbeat(ctx context.Context, activeRequestPrefix string, heartbeatTTL, deadGrace time.Duration) error {
 	return nil
 }
 

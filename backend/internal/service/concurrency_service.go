@@ -51,8 +51,8 @@ type ConcurrencyCache interface {
 	CleanupExpiredAccountSlots(ctx context.Context, accountID int64) error
 	CleanupExpiredAccountSlotKeys(ctx context.Context) error
 
-	// 启动时清理旧进程遗留槽位与等待计数
-	CleanupStaleProcessSlots(ctx context.Context, activeRequestPrefix string) error
+	// 刷新当前进程心跳，并只回收已确认失联进程的槽位。
+	MaintainProcessHeartbeat(ctx context.Context, activeRequestPrefix string, heartbeatTTL, deadGrace time.Duration) error
 }
 
 type APIKeyConcurrencyCache interface {
@@ -209,11 +209,18 @@ func generateRequestID() string {
 	return requestIDPrefix + "-" + strconv.FormatUint(seq, 36)
 }
 
-func (s *ConcurrencyService) CleanupStaleProcessSlots(ctx context.Context) error {
+const (
+	processHeartbeatTTL      = 30 * time.Second
+	processHeartbeatInterval = 10 * time.Second
+	processDeadGrace         = 30 * time.Second
+	processHeartbeatTimeout  = 5 * time.Second
+)
+
+func (s *ConcurrencyService) maintainProcessHeartbeat(ctx context.Context) error {
 	if s == nil || s.cache == nil {
 		return nil
 	}
-	return s.cache.CleanupStaleProcessSlots(ctx, RequestIDPrefix())
+	return s.cache.MaintainProcessHeartbeat(ctx, RequestIDPrefix(), processHeartbeatTTL, processDeadGrace)
 }
 
 const (
@@ -231,6 +238,11 @@ const (
 type ConcurrencyService struct {
 	cache ConcurrencyCache
 
+	workerStartOnce sync.Once
+	workerStopOnce  sync.Once
+	workerStopCh    chan struct{}
+	workerWG        sync.WaitGroup
+
 	accountLoadCacheTTL atomic.Int64
 	accountLoadCacheMu  sync.RWMutex
 	accountLoadCache    map[string]cachedAccountLoadBatch
@@ -247,9 +259,59 @@ func NewConcurrencyService(cache ConcurrencyCache) *ConcurrencyService {
 	svc := &ConcurrencyService{
 		cache:            cache,
 		accountLoadCache: make(map[string]cachedAccountLoadBatch),
+		workerStopCh:     make(chan struct{}),
 	}
 	svc.SetAccountLoadBatchCacheTTL(defaultAccountLoadBatchCacheTTL)
 	return svc
+}
+
+// StartProcessHeartbeat starts node liveness maintenance. The first heartbeat is
+// written synchronously so a newly started peer is visible before serving traffic.
+func (s *ConcurrencyService) StartProcessHeartbeat() {
+	if s == nil || s.cache == nil {
+		return
+	}
+	s.workerStartOnce.Do(func() {
+		run := func() {
+			ctx, cancel := context.WithTimeout(context.Background(), processHeartbeatTimeout)
+			err := s.maintainProcessHeartbeat(ctx)
+			cancel()
+			if err != nil {
+				logger.LegacyPrintf("service.concurrency", "Warning: process heartbeat maintenance failed: %v", err)
+			}
+		}
+
+		run()
+		s.workerWG.Add(1)
+		go func() {
+			defer s.workerWG.Done()
+			ticker := time.NewTicker(processHeartbeatInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-s.workerStopCh:
+					return
+				case <-ticker.C:
+					run()
+				}
+			}
+		}()
+	})
+}
+
+// Stop stops background maintenance without deleting the heartbeat key. Letting
+// its TTL and grace period elapse prevents peers from reclaiming slots while a
+// graceful shutdown is still draining requests.
+func (s *ConcurrencyService) Stop() {
+	if s == nil {
+		return
+	}
+	s.workerStopOnce.Do(func() {
+		if s.workerStopCh != nil {
+			close(s.workerStopCh)
+		}
+	})
+	s.workerWG.Wait()
 }
 
 // AcquireOpenAIWSIngressLease atomically reserves one live ingress connection
@@ -736,13 +798,20 @@ func (s *ConcurrencyService) StartSlotCleanupWorker(_ AccountRepository, interva
 		}
 	}
 
+	s.workerWG.Add(1)
 	go func() {
+		defer s.workerWG.Done()
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
 		runCleanup()
-		for range ticker.C {
-			runCleanup()
+		for {
+			select {
+			case <-s.workerStopCh:
+				return
+			case <-ticker.C:
+				runCleanup()
+			}
 		}
 	}()
 }

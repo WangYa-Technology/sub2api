@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log"
 	"strconv"
@@ -40,6 +41,7 @@ type OpsScheduledReportService struct {
 	userService  *UserService
 	emailService *EmailService
 	redisClient  *redis.Client
+	db           *sql.DB
 	cfg          *config.Config
 
 	instanceID string
@@ -60,6 +62,7 @@ func NewOpsScheduledReportService(
 	userService *UserService,
 	emailService *EmailService,
 	redisClient *redis.Client,
+	db *sql.DB,
 	cfg *config.Config,
 ) *OpsScheduledReportService {
 	lockOn := cfg == nil || strings.TrimSpace(cfg.RunMode) != config.RunModeSimple
@@ -75,6 +78,7 @@ func NewOpsScheduledReportService(
 		userService:  userService,
 		emailService: emailService,
 		redisClient:  redisClient,
+		db:           db,
 		cfg:          cfg,
 
 		instanceID:        uuid.NewString(),
@@ -786,13 +790,10 @@ func buildOpsAccountHealthEmailHTML(title string, start, end time.Time, avail *O
 }
 
 func (s *OpsScheduledReportService) tryAcquireLeaderLock(ctx context.Context) (func(), bool) {
-	if s == nil || !s.distributedLockOn {
-		return nil, true
+	if s == nil || !backgroundTaskLeaderEligible(s.instanceID) {
+		return nil, false
 	}
-	if s.redisClient == nil {
-		s.warnNoRedisOnce.Do(func() {
-			log.Printf("[OpsScheduledReport] redis not configured; running without distributed lock")
-		})
+	if !s.distributedLockOn {
 		return nil, true
 	}
 	if ctx == nil {
@@ -806,6 +807,16 @@ func (s *OpsScheduledReportService) tryAcquireLeaderLock(ctx context.Context) (f
 	}
 	if ttl <= 0 {
 		ttl = 5 * time.Minute
+	}
+	if s.db != nil {
+		release, ok, _ := tryAcquirePersistentDBAdvisoryLock(ctx, s.db, hashAdvisoryLockID(key), s.instanceID)
+		return release, ok
+	}
+	if s.redisClient == nil {
+		s.warnNoRedisOnce.Do(func() {
+			log.Printf("[OpsScheduledReport] no distributed lock backend; running without lock")
+		})
+		return func() {}, true
 	}
 
 	ok, err := s.redisClient.SetNX(ctx, key, s.instanceID, ttl).Result()

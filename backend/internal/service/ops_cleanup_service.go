@@ -337,19 +337,21 @@ func (s *OpsCleanupService) runCleanupOnce(ctx context.Context) (opsCleanupDelet
 }
 
 func (s *OpsCleanupService) tryAcquireLeaderLock(ctx context.Context) (func(), bool) {
-	if s == nil {
+	if s == nil || !backgroundTaskLeaderEligible(s.instanceID) {
 		return nil, false
 	}
-	// In simple run mode, assume single instance.
-	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
-		return nil, true
-	}
-
 	key := opsCleanupLeaderLockKeyDefault
 	ttl := opsCleanupLeaderLockTTLDefault
 
-	// Prefer Redis leader lock when available, but avoid stampeding the DB when Redis is flaky by
-	// falling back to a DB advisory lock.
+	if s.db != nil {
+		release, ok, _ := tryAcquirePersistentDBAdvisoryLock(ctx, s.db, hashAdvisoryLockID(key), s.instanceID)
+		return release, ok
+	}
+	// In simple run mode with no shared database lock backend, assume one instance.
+	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
+		return func() {}, true
+	}
+
 	if s.redisClient != nil {
 		ok, err := s.redisClient.SetNX(ctx, key, s.instanceID, ttl).Result()
 		if err == nil {
@@ -360,21 +362,12 @@ func (s *OpsCleanupService) tryAcquireLeaderLock(ctx context.Context) (func(), b
 				_, _ = opsCleanupReleaseScript.Run(ctx, s.redisClient, []string{key}, s.instanceID).Result()
 			}, true
 		}
-		// Redis error: fall back to DB advisory lock.
 		s.warnNoRedisOnce.Do(func() {
-			logger.LegacyPrintf("service.ops_cleanup", "[OpsCleanup] leader lock SetNX failed; falling back to DB advisory lock: %v", err)
+			logger.LegacyPrintf("service.ops_cleanup", "[OpsCleanup] leader lock SetNX failed; skipping this cycle: %v", err)
 		})
-	} else {
-		s.warnNoRedisOnce.Do(func() {
-			logger.LegacyPrintf("service.ops_cleanup", "[OpsCleanup] redis not configured; using DB advisory lock")
-		})
-	}
-
-	release, ok := tryAcquireDBAdvisoryLock(ctx, s.db, hashAdvisoryLockID(key))
-	if !ok {
 		return nil, false
 	}
-	return release, true
+	return func() {}, true
 }
 
 func (s *OpsCleanupService) recordHeartbeatSuccess(runAt time.Time, duration time.Duration, counts opsCleanupDeletedCounts) {

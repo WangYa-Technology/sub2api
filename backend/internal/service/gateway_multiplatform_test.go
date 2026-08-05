@@ -2132,7 +2132,7 @@ func (m *mockConcurrencyCache) CleanupExpiredAccountSlotKeys(ctx context.Context
 	return nil
 }
 
-func (m *mockConcurrencyCache) CleanupStaleProcessSlots(ctx context.Context, activeRequestPrefix string) error {
+func (m *mockConcurrencyCache) MaintainProcessHeartbeat(ctx context.Context, activeRequestPrefix string, heartbeatTTL, deadGrace time.Duration) error {
 	return nil
 }
 

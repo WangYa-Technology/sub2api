@@ -40,6 +40,27 @@ func TestLoadServerTimingConfig(t *testing.T) {
 	})
 }
 
+func TestLoadGlobalBackgroundTasksConfig(t *testing.T) {
+	t.Run("eligible by default", func(t *testing.T) {
+		resetViperWithJWTSecret(t)
+		cfg, err := Load()
+		require.NoError(t, err)
+		require.False(t, cfg.GlobalBackgroundTasks.Disabled)
+	})
+
+	t.Run("disabled by environment", func(t *testing.T) {
+		resetViperWithJWTSecret(t)
+		t.Setenv("GLOBAL_BACKGROUND_TASKS_DISABLED", "true")
+		t.Setenv("OPS_NODE_ID", "jp-01")
+		t.Setenv("OPS_REGION", "japan")
+		cfg, err := Load()
+		require.NoError(t, err)
+		require.True(t, cfg.GlobalBackgroundTasks.Disabled)
+		require.Equal(t, "jp-01", cfg.Ops.NodeID)
+		require.Equal(t, "japan", cfg.Ops.Region)
+	})
+}
+
 func TestLoadRedisUsernameFromEnvironment(t *testing.T) {
 	resetViperWithJWTSecret(t)
 	t.Setenv("REDIS_USERNAME", "app-user")
@@ -1542,6 +1563,13 @@ func TestValidateConfigErrors(t *testing.T) {
 				c.APIKeyAuth.InvalidAbuse.Capacity = 255
 			},
 			wantErr: "api_key_auth_cache.invalid_abuse.capacity",
+		},
+		{
+			name: "auth invalidation scope too long",
+			mutate: func(c *Config) {
+				c.APIKeyAuth.InvalidationScope = strings.Repeat("a", 201)
+			},
+			wantErr: "api_key_auth_cache.invalidation_scope",
 		},
 		{
 			name:    "jwt secret required",

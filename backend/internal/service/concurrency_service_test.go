@@ -167,7 +167,7 @@ func (c *stubConcurrencyCacheForTest) CleanupExpiredAccountSlotKeys(_ context.Co
 	return c.cleanupErr
 }
 
-func (c *stubConcurrencyCacheForTest) CleanupStaleProcessSlots(_ context.Context, _ string) error {
+func (c *stubConcurrencyCacheForTest) MaintainProcessHeartbeat(_ context.Context, _ string, _, _ time.Duration) error {
 	return c.cleanupErr
 }
 
@@ -176,20 +176,20 @@ type trackingConcurrencyCache struct {
 	cleanupPrefix string
 }
 
-func (c *trackingConcurrencyCache) CleanupStaleProcessSlots(_ context.Context, prefix string) error {
+func (c *trackingConcurrencyCache) MaintainProcessHeartbeat(_ context.Context, prefix string, _, _ time.Duration) error {
 	c.cleanupPrefix = prefix
 	return c.cleanupErr
 }
 
-func TestCleanupStaleProcessSlots_NilCache(t *testing.T) {
+func TestMaintainProcessHeartbeat_NilCache(t *testing.T) {
 	svc := &ConcurrencyService{cache: nil}
-	require.NoError(t, svc.CleanupStaleProcessSlots(context.Background()))
+	require.NoError(t, svc.maintainProcessHeartbeat(context.Background()))
 }
 
-func TestCleanupStaleProcessSlots_DelegatesPrefix(t *testing.T) {
+func TestMaintainProcessHeartbeat_DelegatesPrefix(t *testing.T) {
 	cache := &trackingConcurrencyCache{}
 	svc := NewConcurrencyService(cache)
-	require.NoError(t, svc.CleanupStaleProcessSlots(context.Background()))
+	require.NoError(t, svc.maintainProcessHeartbeat(context.Background()))
 	require.Equal(t, RequestIDPrefix(), cache.cleanupPrefix)
 }
 

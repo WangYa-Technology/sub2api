@@ -3,6 +3,7 @@ package service
 import (
 	"compress/gzip"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,6 +28,9 @@ const (
 	settingKeyBackupRecords  = "backup_records"
 
 	maxBackupRecords = 100
+
+	backupScheduledLeaderLockKey = "backup:scheduled:leader"
+	backupScheduledLeaderLockTTL = 35 * time.Minute
 )
 
 var (
@@ -127,6 +131,9 @@ type BackupService struct {
 	encryptionKeyConfigured bool
 	storeFactory            BackupObjectStoreFactory
 	dumper                  DBDumper
+	lockCache               LeaderLockCache
+	db                      *sql.DB
+	instanceID              string
 
 	opMu      sync.Mutex // 保护 backingUp/restoring 标志
 	backingUp bool
@@ -163,9 +170,18 @@ func NewBackupService(
 		encryptionKeyConfigured: cfg.Totp.EncryptionKeyConfigured,
 		storeFactory:            storeFactory,
 		dumper:                  dumper,
+		instanceID:              uuid.NewString(),
 		bgCtx:                   bgCtx,
 		bgCancel:                bgCancel,
 	}
+}
+
+func (s *BackupService) SetLeaderLock(lockCache LeaderLockCache, db *sql.DB) {
+	if s == nil {
+		return
+	}
+	s.lockCache = lockCache
+	s.db = db
 }
 
 // Start 启动定时备份调度器并清理孤立记录
@@ -173,8 +189,16 @@ func (s *BackupService) Start() {
 	s.cronSched = cron.New()
 	s.cronSched.Start()
 
-	// 清理重启后孤立的 running 记录
-	s.recoverStaleRecords()
+	// Only the elected backup leader may repair shared running records. During a
+	// rolling release, a newly started peer must not mark the active leader's
+	// backup as interrupted.
+	lockCtx, lockCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	release, acquired := tryAcquireSingletonLeaderLock(lockCtx, s.lockCache, s.db, backupScheduledLeaderLockKey, s.instanceID, backupScheduledLeaderLockTTL)
+	lockCancel()
+	if acquired {
+		s.recoverStaleRecords()
+		release()
+	}
 
 	// 加载已有的定时配置
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -421,6 +445,11 @@ func (s *BackupService) runScheduledBackup() {
 
 	ctx, cancel := context.WithTimeout(s.bgCtx, 30*time.Minute)
 	defer cancel()
+	release, acquired := tryAcquireSingletonLeaderLock(ctx, s.lockCache, s.db, backupScheduledLeaderLockKey, s.instanceID, backupScheduledLeaderLockTTL)
+	if !acquired {
+		return
+	}
+	defer release()
 
 	// 读取定时备份配置中的过期天数
 	schedule, _ := s.GetSchedule(ctx)

@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"log"
 	"net/http"
 	"sync"
@@ -74,6 +75,7 @@ func provideServiceBuildInfo(buildInfo handler.BuildInfo) service.BuildInfo {
 
 func provideCleanup(
 	entClient *ent.Client,
+	db *sql.DB,
 	rdb *redis.Client,
 	opsMetricsCollector *service.OpsMetricsCollector,
 	opsAggregation *service.OpsAggregationService,
@@ -86,6 +88,7 @@ func provideCleanup(
 	apiKeyService *service.APIKeyService,
 	authCacheInvalidationWorker *service.AuthCacheInvalidationWorker,
 	schedulerSnapshot *service.SchedulerSnapshotService,
+	concurrencyService *service.ConcurrencyService,
 	tokenRefresh *service.TokenRefreshService,
 	accountExpiry *service.AccountExpiryService,
 	proxyExpiry *service.ProxyExpiryService,
@@ -201,6 +204,12 @@ func provideCleanup(
 			{"SchedulerSnapshotService", func() error {
 				if schedulerSnapshot != nil {
 					schedulerSnapshot.Stop()
+				}
+				return nil
+			}},
+			{"ConcurrencyService", func() error {
+				if concurrencyService != nil {
+					concurrencyService.Stop()
 				}
 				return nil
 			}},
@@ -341,6 +350,10 @@ func provideCleanup(
 		}
 
 		infraSteps := []cleanupStep{
+			{"BackgroundLeaderLocks", func() error {
+				service.ReleasePersistentLeaderLocks(db)
+				return nil
+			}},
 			{"Redis", func() error {
 				if rdb == nil {
 					return nil

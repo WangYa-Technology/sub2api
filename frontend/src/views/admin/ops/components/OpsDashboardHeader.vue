@@ -54,6 +54,25 @@ const realtimeWindow = ref<RealtimeWindow>('1min')
 
 const overview = computed(() => props.overview ?? null)
 const systemMetrics = computed(() => overview.value?.system_metrics ?? null)
+const nodeMetrics = computed(() => overview.value?.node_metrics ?? [])
+const onlineNodeCount = computed(() => nodeMetrics.value.filter((node) => node.online).length)
+
+function formatNodePercent(value?: number | null): string {
+  return typeof value === 'number' && Number.isFinite(value) ? `${value.toFixed(1)}%` : '-'
+}
+
+function formatNodePool(active?: number | null, idle?: number | null, maximum?: number | null): string {
+  if (active == null && idle == null) return '-'
+  const open = Math.max(0, (active ?? 0) + (idle ?? 0))
+  return maximum != null ? `${open} / ${maximum}` : String(open)
+}
+
+function nodeResourceClass(value?: number | null, warning = 80, critical = 95): string {
+  if (value == null) return 'text-gray-500 dark:text-gray-400'
+  if (value >= critical) return 'text-rose-600 dark:text-rose-400'
+  if (value >= warning) return 'text-yellow-600 dark:text-yellow-400'
+  return 'text-gray-900 dark:text-gray-100'
+}
 
 const REALTIME_WINDOW_MINUTES: Record<RealtimeWindow, number> = {
   '1min': 1,
@@ -1434,6 +1453,18 @@ function handleToolbarRefresh() {
 
     <!-- Integrated: System health (cards) -->
     <div v-if="overview" class="mt-2 border-t border-gray-100 pt-4 dark:border-dark-700">
+      <div class="mb-2 flex min-h-5 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400">
+        <span class="font-semibold text-gray-700 dark:text-gray-300">{{ t('admin.ops.metricsSource') }}</span>
+        <template v-if="systemMetrics?.source_node_id">
+          <span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
+          <span class="font-mono font-semibold text-gray-900 dark:text-gray-100">{{ systemMetrics.source_node_id }}</span>
+          <span v-if="systemMetrics.source_region" class="text-gray-300 dark:text-gray-600">·</span>
+          <span v-if="systemMetrics.source_region">{{ systemMetrics.source_region }}</span>
+          <span v-if="systemMetrics.source_hostname" class="text-gray-300 dark:text-gray-600">·</span>
+          <span v-if="systemMetrics.source_hostname" class="font-mono">{{ systemMetrics.source_hostname }}</span>
+        </template>
+        <span v-else class="text-gray-400">{{ t('admin.ops.metricsSourceUnknown') }}</span>
+      </div>
       <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <!-- CPU -->
         <div class="rounded-xl bg-gray-50 p-3 dark:bg-dark-900">
@@ -1539,6 +1570,87 @@ function handleToolbarRefresh() {
             {{ t('common.total') }} <span class="font-mono">{{ jobHeartbeats.length }}</span>
             · {{ t('common.warning') }} <span class="font-mono">{{ jobsWarnCount }}</span>
           </div>
+        </div>
+      </div>
+
+      <div class="mt-5">
+        <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div class="flex items-center gap-2">
+            <h3 class="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+              {{ t('admin.ops.nodes.title') }}
+            </h3>
+            <span class="text-[11px] text-gray-400">
+              {{ t('admin.ops.nodes.onlineSummary', { online: onlineNodeCount, total: nodeMetrics.length }) }}
+            </span>
+          </div>
+          <span class="text-[11px] text-gray-400">{{ t('admin.ops.nodes.retentionHint') }}</span>
+        </div>
+
+        <div v-if="nodeMetrics.length" class="overflow-x-auto border-y border-gray-100 dark:border-dark-700">
+          <div class="min-w-[950px]">
+            <div class="grid grid-cols-[minmax(180px,1.5fr)_80px_90px_120px_135px_135px_minmax(165px,1fr)] gap-3 border-b border-gray-100 px-2 py-2 text-[10px] font-bold uppercase text-gray-400 dark:border-dark-700">
+              <span>{{ t('admin.ops.nodes.node') }}</span>
+              <span>{{ t('admin.ops.nodes.status') }}</span>
+              <span>CPU</span>
+              <span>{{ t('admin.ops.memory') }}</span>
+              <span>{{ t('admin.ops.nodes.dbPool') }}</span>
+              <span>{{ t('admin.ops.nodes.redisPool') }}</span>
+              <span>{{ t('admin.ops.nodes.runtime') }}</span>
+            </div>
+
+            <div
+              v-for="node in nodeMetrics"
+              :key="node.node_id"
+              class="grid grid-cols-[minmax(180px,1.5fr)_80px_90px_120px_135px_135px_minmax(165px,1fr)] items-center gap-3 border-b border-gray-100 px-2 py-2.5 text-xs last:border-b-0 dark:border-dark-700"
+            >
+              <div class="min-w-0">
+                <div class="truncate font-semibold text-gray-900 dark:text-gray-100" :title="node.node_id">{{ node.node_id }}</div>
+                <div class="mt-0.5 truncate text-[10px] text-gray-400">
+                  {{ node.region || t('admin.ops.nodes.unassignedRegion') }} · {{ node.hostname }}
+                </div>
+              </div>
+
+              <div class="flex items-center gap-1.5 font-medium" :class="node.online ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-400'">
+                <span class="h-1.5 w-1.5 rounded-full" :class="node.online ? 'bg-emerald-500' : 'bg-gray-400'"></span>
+                {{ node.online ? t('admin.ops.nodes.online') : t('admin.ops.nodes.offline') }}
+              </div>
+
+              <span class="font-mono" :class="nodeResourceClass(node.cpu_usage_percent)">{{ formatNodePercent(node.cpu_usage_percent) }}</span>
+              <div>
+                <div class="font-mono" :class="nodeResourceClass(node.memory_usage_percent, 85, 95)">{{ formatNodePercent(node.memory_usage_percent) }}</div>
+                <div class="mt-0.5 text-[10px] text-gray-400">
+                  {{ node.memory_used_mb == null || node.memory_total_mb == null ? '-' : `${formatNumber(node.memory_used_mb)} / ${formatNumber(node.memory_total_mb)} MB` }}
+                </div>
+              </div>
+
+              <div>
+                <div class="font-mono" :class="node.db_ok === false ? 'text-rose-600 dark:text-rose-400' : 'text-gray-900 dark:text-gray-100'">
+                  {{ formatNodePool(node.db_conn_active, node.db_conn_idle, node.db_max_open_conns) }}
+                </div>
+                <div class="mt-0.5 text-[10px] text-gray-400">
+                  {{ node.db_ok === false ? 'FAIL' : `${t('admin.ops.active')} ${node.db_conn_active ?? '-'} · ${t('admin.ops.idle')} ${node.db_conn_idle ?? '-'}` }}
+                </div>
+              </div>
+
+              <div>
+                <div class="font-mono" :class="node.redis_ok === false ? 'text-rose-600 dark:text-rose-400' : 'text-gray-900 dark:text-gray-100'">
+                  {{ node.redis_conn_total == null ? '-' : `${node.redis_conn_total} / ${node.redis_pool_size ?? '-'}` }}
+                </div>
+                <div class="mt-0.5 text-[10px] text-gray-400">
+                  {{ node.redis_ok === false ? 'FAIL' : `${t('admin.ops.active')} ${node.redis_conn_total == null || node.redis_conn_idle == null ? '-' : Math.max(node.redis_conn_total - node.redis_conn_idle, 0)} · ${t('admin.ops.idle')} ${node.redis_conn_idle ?? '-'}` }}
+                </div>
+              </div>
+
+              <div class="min-w-0 text-[10px] text-gray-500 dark:text-gray-400">
+                <div class="truncate">{{ node.version || '-' }} · {{ node.background_tasks_disabled ? t('admin.ops.nodes.trafficOnly') : t('admin.ops.nodes.taskCandidate') }}</div>
+                <div class="mt-0.5 truncate">{{ t('admin.ops.nodes.lastSeen') }} {{ formatTimeShort(node.last_seen_at) }} · G {{ node.goroutine_count ?? '-' }} · Q {{ node.concurrency_queue_depth ?? '-' }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-else class="border-y border-gray-100 py-4 text-center text-xs text-gray-400 dark:border-dark-700">
+          {{ t('admin.ops.nodes.empty') }}
         </div>
       </div>
     </div>

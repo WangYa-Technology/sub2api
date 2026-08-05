@@ -428,6 +428,7 @@ func ProvideOllamaCloudUsageService(
 ) *OllamaCloudUsageService {
 	keyConfigured := cfg != nil && cfg.Totp.EncryptionKeyConfigured
 	svc := NewOllamaCloudUsageService(accountRepo, httpUpstream, settingService, encryptor, keyConfigured)
+	applyGlobalBackgroundTaskEligibility(&svc.instanceID, cfg)
 	svc.lockCache = lockCache
 	svc.db = db
 	svc.Start()

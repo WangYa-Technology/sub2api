@@ -381,15 +381,21 @@ return 0
 `)
 
 func (s *OpsAggregationService) tryAcquireLeaderLock(ctx context.Context, key string, ttl time.Duration, logPrefix string) (func(), bool) {
-	if s == nil {
+	if s == nil || !backgroundTaskLeaderEligible(s.instanceID) {
 		return nil, false
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 
-	// Prefer Redis leader lock when available (multi-instance), but avoid stampeding
-	// the DB when Redis is flaky by falling back to a DB advisory lock.
+	if s.db != nil {
+		release, ok, _ := tryAcquirePersistentDBAdvisoryLock(ctx, s.db, hashAdvisoryLockID(key), s.instanceID)
+		if !ok {
+			s.maybeLogSkip(logPrefix)
+		}
+		return release, ok
+	}
+
 	if s.redisClient != nil {
 		ok, err := s.redisClient.SetNX(ctx, key, s.instanceID, ttl).Result()
 		if err == nil {
@@ -404,15 +410,11 @@ func (s *OpsAggregationService) tryAcquireLeaderLock(ctx context.Context, key st
 			}
 			return release, true
 		}
-		// Redis error: fall through to DB advisory lock.
-	}
-
-	release, ok := tryAcquireDBAdvisoryLock(ctx, s.db, hashAdvisoryLockID(key))
-	if !ok {
 		s.maybeLogSkip(logPrefix)
 		return nil, false
 	}
-	return release, true
+
+	return func() {}, true
 }
 
 func (s *OpsAggregationService) maybeLogSkip(prefix string) {

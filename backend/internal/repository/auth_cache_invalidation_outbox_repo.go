@@ -157,3 +157,75 @@ func (r *authCacheInvalidationOutboxRepository) Stats(ctx context.Context) (serv
 	}
 	return stats, nil
 }
+
+func (r *authCacheInvalidationOutboxRepository) GetBroadcastCursor(ctx context.Context, consumerScope string) (int64, error) {
+	if r == nil || r.db == nil {
+		return 0, errors.New("nil auth cache invalidation outbox database")
+	}
+	var cursor int64
+	err := r.db.QueryRowContext(ctx, `
+		INSERT INTO auth_cache_invalidation_consumers (consumer_scope)
+		VALUES ($1)
+		ON CONFLICT (consumer_scope) DO UPDATE
+		SET consumer_scope = EXCLUDED.consumer_scope
+		RETURNING last_event_id
+	`, consumerScope).Scan(&cursor)
+	return cursor, err
+}
+
+func (r *authCacheInvalidationOutboxRepository) ListBroadcastEvents(ctx context.Context, afterID int64, limit int) ([]service.AuthCacheInvalidationEvent, error) {
+	if r == nil || r.db == nil {
+		return nil, errors.New("nil auth cache invalidation outbox database")
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, cache_key, created_at
+		FROM auth_cache_invalidation_events
+		WHERE id > $1
+		ORDER BY id ASC
+		LIMIT $2
+	`, afterID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	events := make([]service.AuthCacheInvalidationEvent, 0, limit)
+	for rows.Next() {
+		var event service.AuthCacheInvalidationEvent
+		if err := rows.Scan(&event.ID, &event.CacheKey, &event.CreatedAt); err != nil {
+			return nil, err
+		}
+		event.CacheKey = strings.TrimSpace(event.CacheKey)
+		events = append(events, event)
+	}
+	return events, rows.Err()
+}
+
+func (r *authCacheInvalidationOutboxRepository) AdvanceBroadcastCursor(ctx context.Context, consumerScope string, eventID int64) error {
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE auth_cache_invalidation_consumers
+		SET last_event_id = GREATEST(last_event_id, $2), updated_at = NOW()
+		WHERE consumer_scope = $1
+	`, consumerScope, eventID)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return fmt.Errorf("auth cache invalidation consumer %s is not registered", consumerScope)
+	}
+	return nil
+}
+
+func (r *authCacheInvalidationOutboxRepository) DeleteBroadcastEventsBefore(ctx context.Context, cutoff time.Time) error {
+	_, err := r.db.ExecContext(ctx, `
+		DELETE FROM auth_cache_invalidation_events
+		WHERE created_at < $1
+	`, cutoff)
+	return err
+}

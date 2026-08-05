@@ -4,7 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/config"
 )
+
+const globalBackgroundTaskDisabledOwner = "__sub2api_global_background_tasks_disabled__"
 
 // LeaderLockCache provides cross-instance mutual exclusion for periodic background
 // jobs. It is implemented in the repository layer (Redis-backed) so the service
@@ -19,10 +23,10 @@ type LeaderLockCache interface {
 }
 
 // tryAcquireSingletonLeaderLock provides best-effort single-flight execution of a
-// periodic background job across multiple instances. It prefers the Redis-backed
-// LeaderLockCache and falls back to a Postgres advisory lock when the cache is
-// unavailable or errors, mirroring the approach used by the Ops background
-// services.
+// periodic background job across multiple instances. PostgreSQL is authoritative
+// whenever it is configured because deployments may use one Redis per region while
+// sharing a single database. A database error fails closed; falling back to a
+// regional Redis would allow every region to become leader.
 //
 // Semantics:
 //   - acquired      -> returns a non-nil release func and true; callers should
@@ -33,36 +37,53 @@ type LeaderLockCache interface {
 //     gating, returning a no-op release and true, so the job is never silently
 //     starved.
 //
-// The TTL is purely a crash-safety bound: callers release the lock as soon as the
-// job completes, so leadership is re-contested every cycle rather than pinned to
-// one instance. The TTL must therefore be larger than the job's worst-case
-// runtime so the lock does not expire mid-run.
+// With PostgreSQL, leadership stays pinned to the winning service instance so
+// staggered regional tickers cannot execute sequentially. The returned release is
+// a no-op and shutdown releases all persistent advisory locks. Redis-only fallback
+// retains the per-cycle TTL and compare-and-delete release behavior.
 func tryAcquireSingletonLeaderLock(ctx context.Context, cache LeaderLockCache, db *sql.DB, key, owner string, ttl time.Duration) (func(), bool) {
+	release, acquired, _ := tryAcquireSingletonLeaderLockWithError(ctx, cache, db, key, owner, ttl)
+	return release, acquired
+}
+
+func tryAcquireSingletonLeaderLockWithError(ctx context.Context, cache LeaderLockCache, db *sql.DB, key, owner string, ttl time.Duration) (func(), bool, error) {
+	if !backgroundTaskLeaderEligible(owner) {
+		return nil, false, nil
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 
-	if cache != nil {
-		ok, err := cache.TryAcquireLeaderLock(ctx, key, owner, ttl)
-		if err == nil {
-			if !ok {
-				return nil, false
-			}
-			release := func() {
-				ctx2, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-				defer cancel()
-				_ = cache.ReleaseLeaderLock(ctx2, key, owner)
-			}
-			return release, true
-		}
-		// Cache error: fall through to the DB advisory lock so a flaky Redis does
-		// not stampede the job across every instance.
+	if db != nil {
+		return tryAcquirePersistentDBAdvisoryLock(ctx, db, hashAdvisoryLockID(key), owner)
 	}
 
-	if db != nil {
-		return tryAcquireDBAdvisoryLock(ctx, db, hashAdvisoryLockID(key))
+	if cache != nil {
+		ok, err := cache.TryAcquireLeaderLock(ctx, key, owner, ttl)
+		if err != nil {
+			return nil, false, err
+		}
+		if !ok {
+			return nil, false, nil
+		}
+		release := func() {
+			ctx2, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_ = cache.ReleaseLeaderLock(ctx2, key, owner)
+		}
+		return release, true, nil
 	}
 
 	// No coordination backend available: run without gating.
-	return func() {}, true
+	return func() {}, true, nil
+}
+
+func backgroundTaskLeaderEligible(owner string) bool {
+	return owner != globalBackgroundTaskDisabledOwner
+}
+
+func applyGlobalBackgroundTaskEligibility(instanceID *string, cfg *config.Config) {
+	if instanceID != nil && cfg != nil && cfg.GlobalBackgroundTasks.Disabled {
+		*instanceID = globalBackgroundTaskDisabledOwner
+	}
 }

@@ -32,6 +32,8 @@ type OpsRepository interface {
 
 	InsertSystemMetrics(ctx context.Context, input *OpsInsertSystemMetricsInput) error
 	GetLatestSystemMetrics(ctx context.Context, windowMinutes int) (*OpsSystemMetricsSnapshot, error)
+	UpsertNodeMetrics(ctx context.Context, input *OpsNodeMetrics) error
+	ListNodeMetrics(ctx context.Context, seenSince time.Time) ([]*OpsNodeMetrics, error)
 
 	UpsertJobHeartbeat(ctx context.Context, input *OpsUpsertJobHeartbeatInput) error
 	ListJobHeartbeats(ctx context.Context) ([]*OpsJobHeartbeat, error)
@@ -126,8 +128,11 @@ type OpsInsertErrorLogInput struct {
 }
 
 type OpsInsertSystemMetricsInput struct {
-	CreatedAt     time.Time
-	WindowMinutes int
+	CreatedAt      time.Time
+	WindowMinutes  int
+	SourceNodeID   string
+	SourceRegion   string
+	SourceHostname string
 
 	Platform *string
 	GroupID  *int64
@@ -250,9 +255,12 @@ type OpsSystemLogCleanupAudit struct {
 }
 
 type OpsSystemMetricsSnapshot struct {
-	ID            int64     `json:"id"`
-	CreatedAt     time.Time `json:"created_at"`
-	WindowMinutes int       `json:"window_minutes"`
+	ID             int64     `json:"id"`
+	CreatedAt      time.Time `json:"created_at"`
+	WindowMinutes  int       `json:"window_minutes"`
+	SourceNodeID   string    `json:"source_node_id,omitempty"`
+	SourceRegion   string    `json:"source_region,omitempty"`
+	SourceHostname string    `json:"source_hostname,omitempty"`
 
 	CPUUsagePercent    *float64 `json:"cpu_usage_percent"`
 	MemoryUsedMB       *int64   `json:"memory_used_mb"`
@@ -276,6 +284,38 @@ type OpsSystemMetricsSnapshot struct {
 	GoroutineCount        *int   `json:"goroutine_count"`
 	ConcurrencyQueueDepth *int   `json:"concurrency_queue_depth"`
 	AccountSwitchCount    *int64 `json:"account_switch_count"`
+}
+
+type OpsNodeMetrics struct {
+	NodeID   string `json:"node_id"`
+	Region   string `json:"region"`
+	Hostname string `json:"hostname"`
+	Version  string `json:"version"`
+
+	StartedAt             time.Time `json:"started_at"`
+	LastSeenAt            time.Time `json:"last_seen_at"`
+	Online                bool      `json:"online"`
+	ReportIntervalSeconds int       `json:"report_interval_seconds"`
+
+	CPUUsagePercent    *float64 `json:"cpu_usage_percent"`
+	MemoryUsedMB       *int64   `json:"memory_used_mb"`
+	MemoryTotalMB      *int64   `json:"memory_total_mb"`
+	MemoryUsagePercent *float64 `json:"memory_usage_percent"`
+
+	DBOK    *bool `json:"db_ok"`
+	RedisOK *bool `json:"redis_ok"`
+
+	DBConnActive          *int `json:"db_conn_active"`
+	DBConnIdle            *int `json:"db_conn_idle"`
+	DBConnWaiting         *int `json:"db_conn_waiting"`
+	DBMaxOpenConns        *int `json:"db_max_open_conns"`
+	RedisConnTotal        *int `json:"redis_conn_total"`
+	RedisConnIdle         *int `json:"redis_conn_idle"`
+	RedisPoolSize         *int `json:"redis_pool_size"`
+	GoroutineCount        *int `json:"goroutine_count"`
+	ConcurrencyQueueDepth *int `json:"concurrency_queue_depth"`
+
+	BackgroundTasksDisabled bool `json:"background_tasks_disabled"`
 }
 
 type OpsUpsertJobHeartbeatInput struct {

@@ -54,6 +54,11 @@ type OpsMetricsCollector struct {
 	db          *sql.DB
 	redisClient *redis.Client
 	instanceID  string
+	nodeID      string
+	region      string
+	hostname    string
+	version     string
+	startedAt   time.Time
 
 	lastCgroupCPUUsageNanos uint64
 	lastCgroupCPUSampleAt   time.Time
@@ -74,7 +79,21 @@ func NewOpsMetricsCollector(
 	db *sql.DB,
 	redisClient *redis.Client,
 	cfg *config.Config,
+	buildInfo BuildInfo,
 ) *OpsMetricsCollector {
+	hostname, _ := os.Hostname()
+	hostname = strings.TrimSpace(hostname)
+	if hostname == "" {
+		hostname = "unknown"
+	}
+	nodeID := hostname
+	region := ""
+	if cfg != nil {
+		if configured := strings.TrimSpace(cfg.Ops.NodeID); configured != "" {
+			nodeID = configured
+		}
+		region = strings.TrimSpace(cfg.Ops.Region)
+	}
 	return &OpsMetricsCollector{
 		opsRepo:            opsRepo,
 		settingRepo:        settingRepo,
@@ -84,6 +103,11 @@ func NewOpsMetricsCollector(
 		db:                 db,
 		redisClient:        redisClient,
 		instanceID:         uuid.NewString(),
+		nodeID:             nodeID,
+		region:             region,
+		hostname:           hostname,
+		version:            strings.TrimSpace(buildInfo.Version),
+		startedAt:          time.Now().UTC(),
 	}
 }
 
@@ -180,6 +204,11 @@ func (c *OpsMetricsCollector) collectOnce() {
 		return
 	}
 
+	nodeMetrics := c.collectNodeMetrics(ctx)
+	if err := c.opsRepo.UpsertNodeMetrics(ctx, nodeMetrics); err != nil {
+		log.Printf("[OpsMetricsCollector] report node metrics failed: %v", err)
+	}
+
 	release, ok := c.tryAcquireLeaderLock(ctx)
 	if !ok {
 		return
@@ -189,7 +218,7 @@ func (c *OpsMetricsCollector) collectOnce() {
 	}
 
 	startedAt := time.Now().UTC()
-	err := c.collectAndPersist(ctx)
+	err := c.collectAndPersist(ctx, nodeMetrics)
 	finishedAt := time.Now().UTC()
 
 	durationMs := finishedAt.Sub(startedAt).Milliseconds()
@@ -253,7 +282,52 @@ func (c *OpsMetricsCollector) isMonitoringEnabled(ctx context.Context) bool {
 	}
 }
 
-func (c *OpsMetricsCollector) collectAndPersist(ctx context.Context) error {
+func (c *OpsMetricsCollector) collectNodeMetrics(ctx context.Context) *OpsNodeMetrics {
+	sys, err := c.collectSystemStats(ctx)
+	if err != nil {
+		log.Printf("[OpsMetricsCollector] system stats error: %v", err)
+	}
+	dbOK := c.checkDB(ctx)
+	redisOK := c.checkRedis(ctx)
+	active, idle := c.dbPoolStats()
+	redisTotal, redisIdle, redisStatsOK := c.redisPoolStats()
+
+	out := &OpsNodeMetrics{
+		NodeID:                  c.nodeID,
+		Region:                  c.region,
+		Hostname:                c.hostname,
+		Version:                 c.version,
+		StartedAt:               c.startedAt,
+		LastSeenAt:              time.Now().UTC(),
+		ReportIntervalSeconds:   int(c.getInterval().Seconds()),
+		CPUUsagePercent:         sys.cpuUsagePercent,
+		MemoryUsedMB:            sys.memoryUsedMB,
+		MemoryTotalMB:           sys.memoryTotalMB,
+		MemoryUsagePercent:      sys.memoryUsagePercent,
+		DBOK:                    boolPtr(dbOK),
+		RedisOK:                 boolPtr(redisOK),
+		DBConnActive:            intPtr(active),
+		DBConnIdle:              intPtr(idle),
+		GoroutineCount:          intPtr(runtime.NumGoroutine()),
+		ConcurrencyQueueDepth:   c.collectConcurrencyQueueDepth(ctx),
+		BackgroundTasksDisabled: c.cfg != nil && c.cfg.GlobalBackgroundTasks.Disabled,
+	}
+	if c.cfg != nil {
+		if c.cfg.Database.MaxOpenConns > 0 {
+			out.DBMaxOpenConns = intPtr(c.cfg.Database.MaxOpenConns)
+		}
+		if c.cfg.Redis.PoolSize > 0 {
+			out.RedisPoolSize = intPtr(c.cfg.Redis.PoolSize)
+		}
+	}
+	if redisStatsOK {
+		out.RedisConnTotal = intPtr(redisTotal)
+		out.RedisConnIdle = intPtr(redisIdle)
+	}
+	return out
+}
+
+func (c *OpsMetricsCollector) collectAndPersist(ctx context.Context, node *OpsNodeMetrics) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -263,16 +337,9 @@ func (c *OpsMetricsCollector) collectAndPersist(ctx context.Context) error {
 	windowEnd := now.Truncate(time.Minute)
 	windowStart := windowEnd.Add(-1 * time.Minute)
 
-	sys, err := c.collectSystemStats(ctx)
-	if err != nil {
-		// Continue; system stats are best-effort.
-		log.Printf("[OpsMetricsCollector] system stats error: %v", err)
+	if node == nil {
+		node = c.collectNodeMetrics(ctx)
 	}
-
-	dbOK := c.checkDB(ctx)
-	redisOK := c.checkRedis(ctx)
-	active, idle := c.dbPoolStats()
-	redisTotal, redisIdle, redisStatsOK := c.redisPoolStats()
 
 	successCount, tokenConsumed, err := c.queryUsageCounts(ctx, windowStart, windowEnd)
 	if err != nil {
@@ -302,12 +369,12 @@ func (c *OpsMetricsCollector) collectAndPersist(ctx context.Context) error {
 	qps := float64(requestTotal) / windowSeconds
 	tps := float64(tokenConsumed) / windowSeconds
 
-	goroutines := runtime.NumGoroutine()
-	concurrencyQueueDepth := c.collectConcurrencyQueueDepth(ctx)
-
 	input := &OpsInsertSystemMetricsInput{
-		CreatedAt:     windowEnd,
-		WindowMinutes: 1,
+		CreatedAt:      windowEnd,
+		WindowMinutes:  1,
+		SourceNodeID:   node.NodeID,
+		SourceRegion:   node.Region,
+		SourceHostname: node.Hostname,
 
 		SuccessCount:         successCount,
 		ErrorCountTotal:      errorTotal,
@@ -337,31 +404,22 @@ func (c *OpsMetricsCollector) collectAndPersist(ctx context.Context) error {
 		TTFTAvgMs: ttft.avg,
 		TTFTMaxMs: ttft.max,
 
-		CPUUsagePercent:    sys.cpuUsagePercent,
-		MemoryUsedMB:       sys.memoryUsedMB,
-		MemoryTotalMB:      sys.memoryTotalMB,
-		MemoryUsagePercent: sys.memoryUsagePercent,
+		CPUUsagePercent:    node.CPUUsagePercent,
+		MemoryUsedMB:       node.MemoryUsedMB,
+		MemoryTotalMB:      node.MemoryTotalMB,
+		MemoryUsagePercent: node.MemoryUsagePercent,
 
-		DBOK:    boolPtr(dbOK),
-		RedisOK: boolPtr(redisOK),
+		DBOK:    node.DBOK,
+		RedisOK: node.RedisOK,
 
-		RedisConnTotal: func() *int {
-			if !redisStatsOK {
-				return nil
-			}
-			return intPtr(redisTotal)
-		}(),
-		RedisConnIdle: func() *int {
-			if !redisStatsOK {
-				return nil
-			}
-			return intPtr(redisIdle)
-		}(),
+		RedisConnTotal: node.RedisConnTotal,
+		RedisConnIdle:  node.RedisConnIdle,
 
-		DBConnActive:          intPtr(active),
-		DBConnIdle:            intPtr(idle),
-		GoroutineCount:        intPtr(goroutines),
-		ConcurrencyQueueDepth: concurrencyQueueDepth,
+		DBConnActive:          node.DBConnActive,
+		DBConnIdle:            node.DBConnIdle,
+		DBConnWaiting:         node.DBConnWaiting,
+		GoroutineCount:        node.GoroutineCount,
+		ConcurrencyQueueDepth: node.ConcurrencyQueueDepth,
 	}
 
 	return c.opsRepo.InsertSystemMetrics(ctx, input)
@@ -870,23 +928,27 @@ return 0
 `)
 
 func (c *OpsMetricsCollector) tryAcquireLeaderLock(ctx context.Context) (func(), bool) {
-	if c == nil || c.redisClient == nil {
-		return nil, true
+	if c == nil || !backgroundTaskLeaderEligible(c.instanceID) {
+		return nil, false
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if c.db != nil {
+		release, ok, _ := tryAcquirePersistentDBAdvisoryLock(ctx, c.db, opsMetricsCollectorAdvisoryLockID, c.instanceID)
+		if !ok {
+			c.maybeLogSkip()
+		}
+		return release, ok
+	}
+	if c.redisClient == nil {
+		return func() {}, true
+	}
 
 	ok, err := c.redisClient.SetNX(ctx, opsMetricsCollectorLeaderLockKey, c.instanceID, opsMetricsCollectorLeaderLockTTL).Result()
 	if err != nil {
-		// Prefer fail-closed to avoid stampeding the database when Redis is flaky.
-		// Fallback to a DB advisory lock when Redis is present but unavailable.
-		release, ok := tryAcquireDBAdvisoryLock(ctx, c.db, opsMetricsCollectorAdvisoryLockID)
-		if !ok {
-			c.maybeLogSkip()
-			return nil, false
-		}
-		return release, true
+		c.maybeLogSkip()
+		return nil, false
 	}
 	if !ok {
 		c.maybeLogSkip()

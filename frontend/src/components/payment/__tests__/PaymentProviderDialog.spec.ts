@@ -16,6 +16,8 @@ const messages: Record<string, string> = {
   'admin.settings.payment.customMethodDisplayNamePlaceholder': '信用卡',
   'admin.settings.payment.paymentGuideTrigger': 'View payment guide',
   'admin.settings.payment.alipayGuideSummary': 'Desktop prefers QR precreate and falls back to cashier; mobile prefers WAP checkout.',
+  'admin.settings.payment.alipaySandbox': 'Sandbox environment',
+  'admin.settings.payment.alipaySandboxHint': 'Enable only for sandbox apps.',
   'admin.settings.payment.wxpayGuideSummary': 'Desktop prefers Native QR; mobile routes to JSAPI or H5 based on browser context.',
   'admin.settings.payment.airwallexGuideSummary': 'Use Payment Acceptance read/write only.',
   'admin.settings.payment.stripeWebhookHint': 'Configure Stripe webhook.',
@@ -88,7 +90,9 @@ function mountDialog(options: { editing?: ProviderInstance | null } = {}) {
           template: '<div />',
         },
         ToggleSwitch: {
-          template: '<div />',
+          props: ['label', 'checked'],
+          emits: ['toggle'],
+          template: '<button type="button" :data-checked="String(checked)" @click="$emit(\'toggle\')">{{ label }}</button>',
         },
       },
     },
@@ -137,6 +141,36 @@ describe('PaymentProviderDialog payment guide', () => {
     expect(wrapper.text()).toContain(messages['admin.settings.payment.stripeWebhookHint'])
     expect(wrapper.text()).toContain(`Use Stripe API version ${STRIPE_SDK_API_VERSION}.`)
     expect(wrapper.text()).toContain('/api/v1/payment/webhook/stripe')
+  })
+
+  it('loads and saves the Alipay sandbox setting without exposing credentials', async () => {
+    const provider = providerFactory({
+      provider_key: 'alipay',
+      name: 'Alipay Sandbox',
+      config: {
+        appId: '9021000000000000',
+        sandbox: 'true',
+        notifyUrl: 'https://example.com/api/v1/payment/webhook/alipay',
+        returnUrl: 'https://example.com/payment/result',
+      },
+      supported_types: ['alipay'],
+    })
+    const wrapper = mountDialog({ editing: provider })
+
+    ;(wrapper.vm as unknown as { loadProvider: (provider: ProviderInstance) => void }).loadProvider(provider)
+    await nextTick()
+
+    const sandboxSetting = wrapper.get('[data-test="alipay-sandbox-setting"]')
+    const toggle = sandboxSetting.get('button')
+    expect(toggle.attributes('data-checked')).toBe('true')
+
+    await toggle.trigger('click')
+    await wrapper.find('form').trigger('submit.prevent')
+
+    const payload = wrapper.emitted('save')?.[0]?.[0] as { config: Record<string, string> }
+    expect(payload.config.sandbox).toBe('false')
+    expect(payload.config.privateKey).toBeUndefined()
+    expect(payload.config.publicKey).toBeUndefined()
   })
 
   it('emits an empty Airwallex accountId when the admin clears it', async () => {

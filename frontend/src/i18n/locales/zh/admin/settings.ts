@@ -701,6 +701,8 @@ export default {
         helpTextPlaceholder: '输入帮助说明文本...',
         providerEasypay: '易支付',
         providerAlipay: '支付宝官方',
+        alipaySandbox: '沙箱环境',
+        alipaySandboxHint: '仅对支付宝沙箱 AppID 开启。正式应用保持关闭；切换环境前需先处理完该服务商的进行中订单。',
         providerWxpay: '微信官方',
         providerStripe: 'Stripe',
         providerAirwallex: 'Airwallex',

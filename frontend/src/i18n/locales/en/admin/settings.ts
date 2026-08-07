@@ -706,6 +706,8 @@ export default {
         helpTextPlaceholder: 'Enter help text...',
         providerEasypay: 'EasyPay',
         providerAlipay: 'Alipay (Direct)',
+        alipaySandbox: 'Sandbox environment',
+        alipaySandboxHint: 'Enable only for an Alipay sandbox App ID. Keep disabled for production apps, and finish pending orders before switching environments.',
         providerWxpay: 'WeChat Pay (Direct)',
         providerStripe: 'Stripe',
         providerAirwallex: 'Airwallex',

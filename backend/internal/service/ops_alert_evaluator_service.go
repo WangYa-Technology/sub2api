@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -31,6 +32,20 @@ if redis.call("GET", KEYS[1]) == ARGV[1] then
   return redis.call("DEL", KEYS[1])
 end
 return 0
+`)
+
+// opsWeComRateLimitScript 全局限流（固定窗口）：按 UTC 小时桶计数，所有任务
+// 候选节点共享同一计数，leader 切换后计数不重置。INCR 首次返回 1 时设置过期，
+// 保证旧桶自动回收。返回值 1=允许，0=超限。
+var opsWeComRateLimitScript = redis.NewScript(`
+local c = redis.call("INCR", KEYS[1])
+if c == 1 then
+  redis.call("EXPIRE", KEYS[1], ARGV[2])
+end
+if tonumber(ARGV[1]) > 0 and c > tonumber(ARGV[1]) then
+  return 0
+end
+return 1
 `)
 
 type OpsAlertEvaluatorService struct {
@@ -403,26 +418,106 @@ func (s *OpsAlertEvaluatorService) sendOpsWeComOnce(ctx context.Context, cfg *Op
 	if s == nil || s.opsService == nil || s.opsService.weComNotifier == nil || cfg == nil || strings.TrimSpace(deliveryKey) == "" {
 		return opsWeComDeliveryResult{}
 	}
-	delivered, err := s.opsService.weComDeliveryExists(ctx, deliveryKey)
+	// 原子占位：多节点（含 leader 切换窗口期）并发发送同一条通知时，只有恰好
+	// 一个节点能成功 INSERT（settings.key 唯一约束），其余节点视为已投递跳过。
+	claimed, err := s.claimWeComDelivery(ctx, deliveryKey)
 	if err != nil {
-		logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] check WeCom delivery failed (delivery=%s): %v", notificationEmailHash(deliveryKey), err)
+		logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] claim WeCom delivery failed (delivery=%s): %v", notificationEmailHash(deliveryKey), err)
 		return opsWeComDeliveryResult{}
 	}
-	if delivered {
+	if !claimed {
 		return opsWeComDeliveryResult{Delivered: true}
 	}
-	if !s.weComLimiter.Allow(time.Now().UTC()) {
+	// 限流拒绝或发送失败时必须回滚占位，否则该投递键被永久占用、通知永不再发。
+	rollback := func() {
+		releaseCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := s.releaseWeComDelivery(releaseCtx, deliveryKey); err != nil {
+			logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] rollback WeCom delivery claim failed (delivery=%s): %v", notificationEmailHash(deliveryKey), err)
+		}
+	}
+	if !s.allowWeComSend(ctx, cfg.RateLimitPerHour, time.Now().UTC()) {
+		rollback()
 		return opsWeComDeliveryResult{}
 	}
 	if err := s.opsService.weComNotifier.SendMarkdown(ctx, cfg.WebhookURL, content); err != nil {
 		logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] send WeCom notification failed (delivery=%s): %v", notificationEmailHash(deliveryKey), err)
+		rollback()
 		return opsWeComDeliveryResult{}
 	}
-	if err := s.opsService.markWeComDelivered(ctx, deliveryKey); err != nil {
-		logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] persist WeCom delivery failed (delivery=%s): %v", notificationEmailHash(deliveryKey), err)
-		return opsWeComDeliveryResult{Sent: true}
-	}
+	// 发送成功：占位即投递记录，保持不动（由 OpsCleanupService 按 retention 清理）。
 	return opsWeComDeliveryResult{Sent: true, Delivered: true}
+}
+
+// claimWeComDelivery 原子地占用投递键。有 DB 时用 INSERT ... ON CONFLICT DO NOTHING
+// （依赖 settings.key 唯一约束），无 DB（单节点/降级）时退回检查+写入的非原子路径。
+func (s *OpsAlertEvaluatorService) claimWeComDelivery(ctx context.Context, key string) (bool, error) {
+	if s != nil && s.db != nil {
+		res, err := s.db.ExecContext(ctx,
+			`INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT (key) DO NOTHING`,
+			key, time.Now().UTC().Format(time.RFC3339Nano))
+		if err != nil {
+			return false, err
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return false, err
+		}
+		return affected > 0, nil
+	}
+	if s == nil || s.opsService == nil || s.opsService.settingRepo == nil {
+		return false, errors.New("no WeCom delivery claim backend")
+	}
+	delivered, err := s.opsService.weComDeliveryExists(ctx, key)
+	if err != nil || delivered {
+		return false, err
+	}
+	if err := s.opsService.markWeComDelivered(ctx, key); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// releaseWeComDelivery 回滚投递占位，让该通知可在下个周期重试。
+func (s *OpsAlertEvaluatorService) releaseWeComDelivery(ctx context.Context, key string) error {
+	if s != nil && s.db != nil {
+		_, err := s.db.ExecContext(ctx, `DELETE FROM settings WHERE key = $1`, key)
+		return err
+	}
+	if s == nil || s.opsService == nil || s.opsService.settingRepo == nil {
+		return errors.New("no WeCom delivery release backend")
+	}
+	return s.opsService.settingRepo.Delete(ctx, key)
+}
+
+// allowWeComSend 全局限流：Redis 可用时所有任务候选节点共享同一小时计数（leader
+// 切换不重置）；Redis 故障时降级为进程内限流（单 leader 场景下依然准确）。
+func (s *OpsAlertEvaluatorService) allowWeComSend(ctx context.Context, limit int, now time.Time) bool {
+	if limit <= 0 {
+		return true
+	}
+	if s != nil && s.redisClient != nil {
+		ok, err := s.weComRateLimitAllow(ctx, limit, now)
+		if err == nil {
+			return ok
+		}
+		logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] WeCom global rate limit check failed; falling back to local limiter: %v", err)
+	}
+	if s == nil || s.weComLimiter == nil {
+		return true
+	}
+	return s.weComLimiter.Allow(now)
+}
+
+// weComRateLimitAllow 按 UTC 小时桶在 Redis 中执行固定窗口计数限流。
+func (s *OpsAlertEvaluatorService) weComRateLimitAllow(ctx context.Context, limit int, now time.Time) (bool, error) {
+	bucket := now.UTC().Format("20060102T15")
+	key := "ops:wecom:rate:" + bucket
+	res, err := opsWeComRateLimitScript.Run(ctx, s.redisClient, []string{key}, limit, int64((2 * time.Hour).Seconds())).Int()
+	if err != nil {
+		return false, err
+	}
+	return res == 1, nil
 }
 
 func (s *OpsAlertEvaluatorService) evaluateAccountStatusWeComNotifications(ctx context.Context, now time.Time, cfg *OpsWeComNotificationConfig) int {

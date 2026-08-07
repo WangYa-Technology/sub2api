@@ -28,6 +28,10 @@ const (
 )
 
 var (
+	alipayNewClient     = alipay.New
+	alipayLoadPublicKey = func(client *alipay.Client, publicKey string) error {
+		return client.LoadAliPayPublicKey(publicKey)
+	}
 	alipayTradeWapPay = func(client *alipay.Client, param alipay.TradeWapPay) (*url.URL, error) {
 		return client.TradeWapPay(param)
 	}
@@ -68,7 +72,8 @@ func (a *Alipay) getClient() (*alipay.Client, error) {
 	if a.client != nil {
 		return a.client, nil
 	}
-	client, err := alipay.New(a.config["appId"], a.config["privateKey"], true)
+	sandbox, _ := strconv.ParseBool(strings.TrimSpace(a.config["sandbox"]))
+	client, err := alipayNewClient(a.config["appId"], a.config["privateKey"], !sandbox)
 	if err != nil {
 		return nil, fmt.Errorf("alipay init client: %w", err)
 	}
@@ -79,7 +84,7 @@ func (a *Alipay) getClient() (*alipay.Client, error) {
 	if pubKey == "" {
 		return nil, fmt.Errorf("alipay config missing required key: publicKey (or alipayPublicKey)")
 	}
-	if err := client.LoadAliPayPublicKey(pubKey); err != nil {
+	if err := alipayLoadPublicKey(client, pubKey); err != nil {
 		return nil, fmt.Errorf("alipay load public key: %w", err)
 	}
 	a.client = client

@@ -129,6 +129,9 @@ Direct integration with Alipay Open Platform. Mobile flows return an Alipay WAP/
 | **AppID** | Alipay application AppID | Yes |
 | **Private Key** | RSA2 application private key | Yes |
 | **Alipay Public Key** | Alipay public key | Yes |
+| **Sandbox Environment** | Use the Alipay sandbox gateway; enable only for sandbox App IDs | No |
+
+Sandbox mode is stored per provider instance and defaults to disabled, so existing Alipay providers continue using the production gateway after upgrade. The environment cannot be switched while orders are in progress because subsequent query, notification verification, and refund requests must stay on the original gateway.
 
 ### WeChat Pay (Direct)
 

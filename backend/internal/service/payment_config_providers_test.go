@@ -489,6 +489,15 @@ func TestUpdateProviderInstanceRejectsProtectedConfigChangesWhilePendingOrders(t
 			wantValue:     "alipay-app-test",
 		},
 		{
+			name:          "alipay sandbox environment",
+			providerKey:   payment.TypeAlipay,
+			createConfig:  validAlipayProviderConfig,
+			supportedType: []string{payment.TypeAlipay},
+			updateConfig:  map[string]string{"sandbox": "true"},
+			fieldName:     "sandbox",
+			wantValue:     "",
+		},
+		{
 			name:          "easypay pid",
 			providerKey:   payment.TypeEasyPay,
 			createConfig:  validEasyPayProviderConfig,

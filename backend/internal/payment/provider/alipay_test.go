@@ -136,6 +136,50 @@ func TestNewAlipay(t *testing.T) {
 	}
 }
 
+func TestAlipayClientEnvironment(t *testing.T) {
+	originalNewClient := alipayNewClient
+	originalLoadPublicKey := alipayLoadPublicKey
+	t.Cleanup(func() {
+		alipayNewClient = originalNewClient
+		alipayLoadPublicKey = originalLoadPublicKey
+	})
+
+	var productionValues []bool
+	alipayNewClient = func(_, _ string, production bool, _ ...alipay.OptionFunc) (*alipay.Client, error) {
+		productionValues = append(productionValues, production)
+		return &alipay.Client{}, nil
+	}
+	alipayLoadPublicKey = func(_ *alipay.Client, _ string) error { return nil }
+
+	tests := []struct {
+		name           string
+		sandbox        string
+		wantProduction bool
+	}{
+		{name: "unset defaults to production", wantProduction: true},
+		{name: "false uses production", sandbox: "false", wantProduction: true},
+		{name: "true uses sandbox", sandbox: "true", wantProduction: false},
+		{name: "trimmed mixed case true uses sandbox", sandbox: " TRUE ", wantProduction: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := &Alipay{config: map[string]string{
+				"appId":      "test-app-id",
+				"privateKey": "test-private-key",
+				"publicKey":  "test-alipay-public-key",
+				"sandbox":    tt.sandbox,
+			}}
+			if _, err := provider.getClient(); err != nil {
+				t.Fatalf("getClient() error = %v", err)
+			}
+			if got := productionValues[len(productionValues)-1]; got != tt.wantProduction {
+				t.Fatalf("production = %v, want %v", got, tt.wantProduction)
+			}
+		})
+	}
+}
+
 func TestCreateTradeUsesPagePayForDesktop(t *testing.T) {
 	origPreCreate := alipayTradePreCreate
 	origPagePay := alipayTradePagePay

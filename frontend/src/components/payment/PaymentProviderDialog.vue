@@ -152,6 +152,20 @@
         <p v-if="paymentGuide" class="mb-3 text-xs text-gray-500 dark:text-gray-400">
           {{ paymentGuide.summary }}
         </p>
+        <div
+          v-if="form.provider_key === 'alipay'"
+          data-test="alipay-sandbox-setting"
+          class="mb-3 border-y border-gray-100 py-3 dark:border-dark-700"
+        >
+          <ToggleSwitch
+            :label="t('admin.settings.payment.alipaySandbox')"
+            :checked="alipaySandboxEnabled"
+            @toggle="toggleAlipaySandbox"
+          />
+          <p class="mt-1 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+            {{ t('admin.settings.payment.alipaySandboxHint') }}
+          </p>
+        </div>
         <div class="space-y-3">
           <div v-for="field in resolvedFields" :key="field.key">
             <label class="input-label">
@@ -476,6 +490,8 @@ const resolvedFields = computed(() => {
   }))
 })
 
+const alipaySandboxEnabled = computed(() => config.sandbox === 'true')
+
 const paymentGuide = computed<PaymentGuide | null>(() => {
   if (form.provider_key === 'alipay') {
     return {
@@ -564,6 +580,10 @@ function toggleType(type: string) {
   } else {
     form.supported_types = [...form.supported_types, type]
   }
+}
+
+function toggleAlipaySandbox() {
+  config.sandbox = alipaySandboxEnabled.value ? 'false' : 'true'
 }
 
 function normalizedEasyPayCustomMethods(): EasyPayCustomMethod[] {

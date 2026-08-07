@@ -59,16 +59,30 @@ func TestRedeemCodeExpiry(t *testing.T) {
 }
 
 func TestRedeemCodeAffiliateRebateBaseAmount(t *testing.T) {
-	require.Equal(t, 40.0, redeemCodeAffiliateRebateBaseAmount(&RedeemCode{
+	// SalePrice（人民币销售价）按模型广场充值倍率换算为美元返利基数。
+	require.InDelta(t, 10/6.8, redeemCodeAffiliateRebateBaseAmount(&RedeemCode{
 		Type:      RedeemTypeSubscription,
 		SalePrice: 10,
-	}))
+	}, 6.8), 0.0000001)
+	require.InDelta(t, 100.0, redeemCodeAffiliateRebateBaseAmount(&RedeemCode{
+		Type:      RedeemTypeSubscription,
+		SalePrice: 680,
+	}, 6.8), 0.0000001)
+	// 余额兑换码保留旧行为：Value 直接作为返利基数。
 	require.Equal(t, 25.0, redeemCodeAffiliateRebateBaseAmount(&RedeemCode{
 		Type:  RedeemTypeBalance,
 		Value: 25,
-	}))
+	}, 6.8))
+	// 非销售价、非余额类型不触发返利。
 	require.Zero(t, redeemCodeAffiliateRebateBaseAmount(&RedeemCode{
 		Type:  RedeemTypeSubscription,
 		Value: 30,
-	}))
+	}, 6.8))
+	// 汇率无效（<=0）时不发放销售价返利，避免错误放大基数。
+	require.Zero(t, redeemCodeAffiliateRebateBaseAmount(&RedeemCode{
+		Type:      RedeemTypeSubscription,
+		SalePrice: 10,
+	}, 0))
+	// nil 兑换码不触发返利。
+	require.Zero(t, redeemCodeAffiliateRebateBaseAmount(nil, 6.8))
 }

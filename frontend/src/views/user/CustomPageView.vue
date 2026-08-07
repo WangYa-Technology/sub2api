@@ -125,7 +125,7 @@ import { useAdminSettingsStore } from '@/stores/adminSettings'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { buildApiUrl } from '@/api/client'
-import { buildEmbeddedUrl, detectTheme } from '@/utils/embedded-url'
+import { buildEmbeddedUrl, detectTheme, isSameOriginEmbedTarget } from '@/utils/embedded-url'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
@@ -175,12 +175,16 @@ const isMarkdownMode = computed(() => !!markdownSlug.value)
 
 const embeddedUrl = computed(() => {
   if (!menuItem.value || isMarkdownMode.value) return ''
+  const target = menuItem.value.url
+  // 跨域 iframe 目标能读取自身 URL 的查询参数，携带 JWT 会泄露给任意第三方
+  // 域名（服务端日志、页面 JS 均可读取），因此仅对同源/相对路径目标附加凭据。
   return buildEmbeddedUrl(
-    menuItem.value.url,
+    target,
     authStore.user?.id,
     authStore.token,
     pageTheme.value,
     locale.value,
+    { includeCredentials: isSameOriginEmbedTarget(target) },
   )
 })
 

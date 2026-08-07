@@ -245,7 +245,7 @@ import { sanitizeSvg } from '@/utils/sanitize'
 import { sanitizeUrl } from '@/utils/url'
 import { FeatureFlags, makeSidebarFlag } from '@/utils/featureFlags'
 import { useBatchImageAccess } from '@/composables/useBatchImageAccess'
-import { buildEmbeddedUrl, detectTheme } from '@/utils/embedded-url'
+import { buildExternalUrl } from '@/utils/embedded-url'
 import type { CustomMenuItem } from '@/types'
 
 interface NavItem {
@@ -285,7 +285,7 @@ function applyFeatureFlags(items: NavItem[]): NavItem[] {
   return out
 }
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 
 const route = useRoute()
 const router = useRouter()
@@ -741,17 +741,10 @@ const flagAdminPayment = () => adminSettingsStore.paymentEnabled
 const flagBatchImageAccess = () => canUseBatchImage.value
 
 function buildCustomMenuExternalUrl(item: CustomMenuItem): string | undefined {
-  if (!item.url?.startsWith('http://') && !item.url?.startsWith('https://')) {
-    return undefined
-  }
-  const url = buildEmbeddedUrl(
-    item.url,
-    authStore.user?.id,
-    authStore.token,
-    detectTheme(),
-    locale.value,
-  )
-  return url.startsWith('http://') || url.startsWith('https://') ? url : undefined
+  // External menu items open in a new window and may point to any third-party
+  // origin, so we must NOT attach user id / auth token / source context.
+  // buildExternalUrl never embeds credentials; it only validates the scheme.
+  return buildExternalUrl(item.url) || undefined
 }
 
 function customMenuItemToNavItem(item: CustomMenuItem): NavItem {

@@ -144,6 +144,7 @@ type RedeemService struct {
 	entClient            *dbent.Client
 	authCacheInvalidator APIKeyAuthCacheInvalidator
 	affiliateService     *AffiliateService
+	settingRepo          SettingRepository
 }
 
 // NewRedeemService 创建兑换码服务实例
@@ -156,6 +157,7 @@ func NewRedeemService(
 	entClient *dbent.Client,
 	authCacheInvalidator APIKeyAuthCacheInvalidator,
 	affiliateService *AffiliateService,
+	settingRepo SettingRepository,
 ) *RedeemService {
 	redeemUserRepo, _ := userRepo.(RedeemUserAdjustmentRepository)
 	return &RedeemService{
@@ -168,6 +170,7 @@ func NewRedeemService(
 		entClient:            entClient,
 		authCacheInvalidator: authCacheInvalidator,
 		affiliateService:     affiliateService,
+		settingRepo:          settingRepo,
 	}
 }
 
@@ -525,7 +528,10 @@ func (s *RedeemService) Redeem(ctx context.Context, userID int64, code string) (
 	s.invalidateRedeemCaches(ctx, userID, redeemCode)
 
 	// 销售价按人民币录入；大于 0 时按销售价折算返利基数，否则保留余额兑换码的旧返利行为。
-	if rebateBaseAmount := redeemCodeAffiliateRebateBaseAmount(redeemCode); rebateBaseAmount > 0 {
+	// 返利基数以美元计量（与邀请人配额单位一致），人民币销售价通过模型广场
+	// “充值倍率”（SettingKeyModelPlazaCNYPerUSD，默认 6.8）换算为美元。
+	cnyPerUSD := s.modelPlazaCNYPerUSD(ctx)
+	if rebateBaseAmount := redeemCodeAffiliateRebateBaseAmount(redeemCode, cnyPerUSD); rebateBaseAmount > 0 {
 		s.tryAccrueAffiliateRebateForRedeem(ctx, userID, rebateBaseAmount, redeemCode.ID)
 	}
 
@@ -538,17 +544,41 @@ func (s *RedeemService) Redeem(ctx context.Context, userID int64, code string) (
 	return redeemCode, nil
 }
 
-func redeemCodeAffiliateRebateBaseAmount(redeemCode *RedeemCode) float64 {
+// redeemCodeAffiliateRebateBaseAmount 计算兑换码兑付后用于推广返利的基数（美元）。
+//
+//   - SalePrice（人民币销售价）> 0：按模型广场充值倍率 cnyPerUSD 换算为美元基数
+//     （SalePrice / cnyPerUSD）。汇率无效（<=0）时视为无法折算，返回 0 不发放返利。
+//   - 其余情况保留旧行为：余额类型兑换码按 Value（美元）作为基数。
+func redeemCodeAffiliateRebateBaseAmount(redeemCode *RedeemCode, cnyPerUSD float64) float64 {
 	if redeemCode == nil {
 		return 0
 	}
 	if redeemCode.SalePrice > 0 {
-		return redeemCode.SalePrice / 0.25
+		if cnyPerUSD <= 0 {
+			return 0
+		}
+		return redeemCode.SalePrice / cnyPerUSD
 	}
 	if redeemCode.Type == RedeemTypeBalance && redeemCode.Value > 0 {
 		return redeemCode.Value
 	}
 	return 0
+}
+
+// modelPlazaCNYPerUSD 返回模型广场“充值倍率”（1 美元兑多少人民币），
+// 用于把人民币销售价折算为美元返利基数；读取失败时回退默认值。
+func (s *RedeemService) modelPlazaCNYPerUSD(ctx context.Context) float64 {
+	if s == nil || s.settingRepo == nil {
+		return ModelPlazaCNYPerUSDDefault
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	raw, err := s.settingRepo.GetValue(ctx, SettingKeyModelPlazaCNYPerUSD)
+	if err != nil {
+		return ModelPlazaCNYPerUSDDefault
+	}
+	return parseModelPlazaCNYPerUSD(raw)
 }
 
 // invalidateRedeemCaches 失效兑换相关的缓存

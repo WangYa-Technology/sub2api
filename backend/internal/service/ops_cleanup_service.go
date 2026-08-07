@@ -350,6 +350,15 @@ func (s *OpsCleanupService) runCleanupOnce(ctx context.Context) (opsCleanupDelet
 		*t.counter = n
 	}
 
+	// WeCom 通知去重键落在 settings 表（前缀 ops_wecom_delivery:v1:），与告警事件
+	// 同生命周期，复用 ErrorLogRetentionDays 保留期定向清理。settings 表同时存放
+	// 运行配置，不能用 TRUNCATE 全清，必须按前缀删除（详见 deleteOldWeComDeliveryKeys）。
+	n, err := deleteOldWeComDeliveryKeys(ctx, s.db, effective.ErrorLogRetentionDays, opsCleanupBatchSize)
+	if err != nil {
+		return out, err
+	}
+	out.weComDeliveryKeys = n
+
 	// Channel monitor 每日维护（聚合昨日明细 + 软删过期明细/聚合）。
 	// 失败只记日志，不影响 ops 清理的成功状态（与 ops 各步骤风格一致）；
 	// 维护本身已经把每步错误打到 slog，heartbeat result 不再分项记录。

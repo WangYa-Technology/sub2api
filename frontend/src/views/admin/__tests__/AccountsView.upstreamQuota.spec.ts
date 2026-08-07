@@ -24,6 +24,7 @@ const {
   probeUpstreamBilling,
   getUsage,
   deleteAccount,
+  batchDeleteAccounts,
   showToast,
   hideToast,
   showError,
@@ -45,6 +46,7 @@ const {
   probeUpstreamBilling: vi.fn(),
   getUsage: vi.fn(),
   deleteAccount: vi.fn(),
+  batchDeleteAccounts: vi.fn(),
   showToast: vi.fn(),
   hideToast: vi.fn(),
   showError: vi.fn(),
@@ -67,6 +69,7 @@ vi.mock('@/api/admin', () => ({
       probeUpstreamBilling,
       getUsage,
       delete: deleteAccount,
+      batchDelete: batchDeleteAccounts,
       batchClearError: vi.fn(),
       batchRefresh: vi.fn(),
       toggleSchedulable: vi.fn()
@@ -283,6 +286,7 @@ describe('admin AccountsView upstream quota state', () => {
       probeUpstreamBilling,
       getUsage,
       deleteAccount,
+      batchDeleteAccounts,
       showToast,
       hideToast,
       showError,
@@ -678,9 +682,12 @@ describe('admin AccountsView upstream quota state', () => {
     queryUpstreamQuota
       .mockResolvedValueOnce(quotaResultFor(7, 80))
       .mockResolvedValueOnce(quotaResultFor(11, 60))
-    deleteAccount.mockImplementation((id: number) => (
-      id === 7 ? Promise.resolve() : Promise.reject(new Error('delete failed'))
-    ))
+    batchDeleteAccounts.mockResolvedValue({
+      success: 1,
+      failed: 1,
+      failed_ids: [11],
+      errors: { 11: 'delete failed' }
+    })
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     vi.spyOn(console, 'error').mockImplementation(() => {})
 
@@ -699,7 +706,8 @@ describe('admin AccountsView upstream quota state', () => {
     await setupState.handleBulkDelete()
     await flushPromises()
 
-    expect(deleteAccount).toHaveBeenCalledTimes(2)
+    expect(batchDeleteAccounts).toHaveBeenCalledOnce()
+    expect(batchDeleteAccounts).toHaveBeenCalledWith([7, 11])
     expect(localStorage.getItem(quotaCacheKey(99, 7))).toBeNull()
     expect(localStorage.getItem(quotaCacheKey(99, 11))).not.toBeNull()
     wrapper.unmount()

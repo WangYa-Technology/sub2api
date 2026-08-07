@@ -68,10 +68,9 @@ func TestAdminAccountEditPreservesRateSynchronizedAfterLoad(t *testing.T) {
 	require.NoError(t, err)
 
 	synchronizedRate := 0.2
-	require.NoError(t, repo.UpdateUpstreamBillingProbeSnapshot(ctx, probeAccount, &service.UpstreamBillingProbeSnapshot{
-		Status:        service.UpstreamBillingProbeStatusOK,
-		LastAttemptAt: time.Now().UTC(),
-	}, &synchronizedRate))
+	require.NoError(t, repo.UpdateUpstreamBillingProbeSnapshot(
+		ctx, probeAccount, persistedSuccessfulProbeSnapshot(time.Now().UTC()), &synchronizedRate,
+	))
 
 	staleAdminEdit.Name = "name-only-edit"
 	require.NoError(t, repo.UpdateWithAccountBillingSettings(ctx, staleAdminEdit, nil, nil, nil))
@@ -103,10 +102,9 @@ func TestProbeSnapshotSyncsRateOnlyForSuccessfulEnabledAccount(t *testing.T) {
 	loaded, err := repo.GetByID(ctx, account.ID)
 	require.NoError(t, err)
 	syncedRate := 0.065
-	require.NoError(t, repo.UpdateUpstreamBillingProbeSnapshot(ctx, loaded, &service.UpstreamBillingProbeSnapshot{
-		Status:        service.UpstreamBillingProbeStatusOK,
-		LastAttemptAt: time.Now().UTC(),
-	}, &syncedRate))
+	require.NoError(t, repo.UpdateUpstreamBillingProbeSnapshot(
+		ctx, loaded, persistedSuccessfulProbeSnapshot(time.Now().UTC()), &syncedRate,
+	))
 
 	got, err := repo.GetByID(ctx, account.ID)
 	require.NoError(t, err)
@@ -129,10 +127,9 @@ func TestProbeSnapshotSyncsRateOnlyForSuccessfulEnabledAccount(t *testing.T) {
 	manual, err := repo.GetByID(ctx, account.ID)
 	require.NoError(t, err)
 	manualProbeRate := 0.4
-	require.NoError(t, repo.UpdateUpstreamBillingProbeSnapshot(ctx, manual, &service.UpstreamBillingProbeSnapshot{
-		Status:        service.UpstreamBillingProbeStatusOK,
-		LastAttemptAt: time.Now().UTC(),
-	}, &manualProbeRate))
+	require.NoError(t, repo.UpdateUpstreamBillingProbeSnapshot(
+		ctx, manual, persistedSuccessfulProbeSnapshot(time.Now().UTC()), &manualProbeRate,
+	))
 	got, err = repo.GetByID(ctx, account.ID)
 	require.NoError(t, err)
 	require.NotNil(t, got.RateMultiplier)
@@ -144,10 +141,9 @@ func TestProbeSnapshotSyncsRateOnlyForSuccessfulEnabledAccount(t *testing.T) {
 	}))
 	disabled, err := repo.GetByID(ctx, account.ID)
 	require.NoError(t, err)
-	require.NoError(t, repo.UpdateUpstreamBillingProbeSnapshot(ctx, disabled, &service.UpstreamBillingProbeSnapshot{
-		Status:        service.UpstreamBillingProbeStatusOK,
-		LastAttemptAt: time.Now().UTC(),
-	}, &manualProbeRate))
+	require.NoError(t, repo.UpdateUpstreamBillingProbeSnapshot(
+		ctx, disabled, persistedSuccessfulProbeSnapshot(time.Now().UTC()), &manualProbeRate,
+	))
 	got, err = repo.GetByID(ctx, account.ID)
 	require.NoError(t, err)
 	require.NotNil(t, got.RateMultiplier)

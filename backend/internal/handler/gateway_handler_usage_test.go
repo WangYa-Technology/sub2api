@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -57,7 +58,7 @@ func TestUsageQuotaLimitedIncludesSubscriptionMetadata(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodGet, "/v1/usage", nil)
 
 	groupID := int64(7)
-	dailyStart := time.Date(2026, time.July, 19, 0, 0, 0, 0, time.UTC)
+	dailyStart := time.Date(2026, time.July, 19, 0, 0, 0, 0, timezone.Location())
 	weeklyStart := dailyStart.Add(-2 * 24 * time.Hour)
 	monthlyStart := dailyStart.Add(-10 * 24 * time.Hour)
 	expiresAt := dailyStart.Add(45 * 24 * time.Hour)

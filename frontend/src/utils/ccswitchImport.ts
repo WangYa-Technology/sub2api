@@ -36,10 +36,11 @@ function withV1Endpoint(baseUrl: string): string {
  *     与其按 Latin1 还是 UTF-8 解码 base64 字节无关。
  */
 function encodeUsageScript(script: string): string {
-  const asciiSafe = script.replace(/[^\x00-\x7F]/g, (ch) => {
+  let asciiSafe = ''
+  for (const ch of script.split('')) {
     const code = ch.charCodeAt(0)
-    return `\\u${code.toString(16).padStart(4, '0')}`
-  })
+    asciiSafe += code > 0x7f ? `\\u${code.toString(16).padStart(4, '0')}` : ch
+  }
   return btoa(asciiSafe)
 }
 

@@ -16,8 +16,75 @@ type contentModerationRepository struct {
 	db *sql.DB
 }
 
+const contentModerationCleanupClaimSettingKey = "content_moderation_cleanup_claim"
+
 func NewContentModerationRepository(db *sql.DB) service.ContentModerationRepository {
 	return &contentModerationRepository{db: db}
+}
+
+func (r *contentModerationRepository) TryClaimContentModerationCleanup(ctx context.Context, bucket string) (bool, error) {
+	var claimed bool
+	err := r.db.QueryRowContext(ctx, `
+INSERT INTO settings (key, value, updated_at)
+VALUES ($1, $2, NOW())
+ON CONFLICT (key) DO UPDATE
+SET value = EXCLUDED.value, updated_at = NOW()
+WHERE settings.value <> EXCLUDED.value
+RETURNING TRUE
+`, contentModerationCleanupClaimSettingKey, bucket).Scan(&claimed)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("claim content moderation cleanup: %w", err)
+	}
+	return claimed, nil
+}
+
+func (r *contentModerationRepository) ReleaseContentModerationCleanupClaim(ctx context.Context, bucket string) error {
+	_, err := r.db.ExecContext(ctx, "DELETE FROM settings WHERE key = $1 AND value = $2", contentModerationCleanupClaimSettingKey, bucket)
+	if err != nil {
+		return fmt.Errorf("release content moderation cleanup claim: %w", err)
+	}
+	return nil
+}
+
+func (r *contentModerationRepository) EvaluateContentModerationUserViolation(ctx context.Context, userID int64, since time.Time, excludeCyberPolicy bool, autoBanEnabled bool, banThreshold int) (count int, autoBanApplied bool, admin bool, err error) {
+	if r == nil || r.db == nil {
+		return 0, false, false, fmt.Errorf("content moderation database unavailable")
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, false, false, fmt.Errorf("begin content moderation user violation transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var role, status string
+	if err := tx.QueryRowContext(ctx, "SELECT role, status FROM users WHERE id = $1 FOR UPDATE", userID).Scan(&role, &status); err != nil {
+		return 0, false, false, fmt.Errorf("lock content moderation user: %w", err)
+	}
+	admin = role == service.RoleAdmin
+	if err := tx.QueryRowContext(ctx, `
+SELECT COUNT(*) + 1
+FROM content_moderation_logs
+WHERE user_id = $1
+  AND flagged = TRUE
+  AND action <> 'hash_block'
+  AND ($3::bool IS FALSE OR action <> 'cyber_policy')
+  AND created_at >= $2
+  AND created_at > COALESCE((SELECT MAX(created_at) FROM content_moderation_logs WHERE user_id = $1 AND auto_banned = TRUE), '-infinity'::timestamptz)
+`, userID, since, excludeCyberPolicy).Scan(&count); err != nil {
+		return 0, false, admin, fmt.Errorf("count content moderation user violations: %w", err)
+	}
+	if autoBanEnabled && banThreshold > 0 && count >= banThreshold && !admin && status != service.StatusDisabled {
+		if _, err := tx.ExecContext(ctx, "UPDATE users SET status = $1, updated_at = NOW() WHERE id = $2", service.StatusDisabled, userID); err != nil {
+			return 0, false, admin, fmt.Errorf("disable content moderation user: %w", err)
+		}
+		autoBanApplied = true
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, false, admin, fmt.Errorf("commit content moderation user violation transaction: %w", err)
+	}
+	return count, autoBanApplied, admin, nil
 }
 
 func (r *contentModerationRepository) CreateLog(ctx context.Context, log *service.ContentModerationLog) error {

@@ -64,9 +64,10 @@
                 <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('admin.riskControl.preBlockSyncStatus') }}</h2>
                 <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.preBlockSyncHint') }}</p>
               </div>
-              <span class="inline-flex w-fit items-center rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-600 dark:bg-dark-700 dark:text-gray-300">
-                {{ modeLabel(status?.mode ?? configForm.mode) }}
-              </span>
+              <div class="flex flex-wrap items-center gap-2">
+                <span v-if="status?.node_id" class="inline-flex w-fit items-center rounded-full bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-700 dark:bg-sky-900/20 dark:text-sky-300">{{ t('admin.riskControl.currentNode', { node: status.node_id }) }}</span>
+                <span class="inline-flex w-fit items-center rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-600 dark:bg-dark-700 dark:text-gray-300">{{ modeLabel(status?.mode ?? configForm.mode) }}</span>
+              </div>
             </div>
 
             <div class="p-6">
@@ -387,7 +388,7 @@
             </button>
           </div>
 
-          <div v-if="activeSettingsTab === 'basic'" class="space-y-5">
+          <div v-if="activeSettingsTab === 'basic'" class="space-y-5 pb-24">
             <div class="grid grid-cols-1 gap-5 lg:grid-cols-2">
               <div class="flex items-center justify-between rounded-lg border border-gray-100 p-4 dark:border-dark-700">
                 <div>
@@ -401,11 +402,11 @@
                 <Select v-model="configForm.mode" :options="modeOptions" />
                 <p class="mt-2 text-xs leading-5 text-gray-500 dark:text-gray-400">{{ modeDescription(configForm.mode) }}</p>
               </div>
-              <div>
+              <div v-if="false">
                 <label class="input-label">{{ t('admin.riskControl.baseUrl') }}</label>
                 <input v-model.trim="configForm.base_url" type="url" class="input" placeholder="https://api.openai.com" />
               </div>
-              <div>
+              <div v-if="false">
                 <label class="input-label">{{ t('admin.riskControl.model') }}</label>
                 <input v-model.trim="configForm.model" type="text" class="input" placeholder="omni-moderation-latest" />
               </div>
@@ -424,14 +425,95 @@
                   <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">%</span>
                 </div>
               </div>
-              <div>
+              <div v-if="false">
                 <label class="input-label">{{ t('admin.riskControl.proxy') }}</label>
                 <ProxySelector v-model="configForm.proxy_id" :proxies="proxies" />
                 <p class="mt-2 text-xs leading-5 text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.proxyHint') }}</p>
               </div>
             </div>
 
-            <div class="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-800">
+            <section class="mb-20 overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800">
+              <div class="flex flex-col gap-3 border-b border-gray-100 px-4 py-4 dark:border-dark-700 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.riskControl.moderationKeyTargets') }}</h3>
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.moderationKeyTargetsHint') }}</p>
+                </div>
+                <button type="button" class="btn btn-secondary inline-flex items-center gap-2" @click="newKeyFormOpen = !newKeyFormOpen">
+                  <Icon :name="newKeyFormOpen ? 'x' : 'plus'" size="sm" />
+                  {{ newKeyFormOpen ? t('common.cancel') : t('admin.riskControl.addModerationKey') }}
+                </button>
+              </div>
+
+              <div v-if="newKeyFormOpen" class="border-b border-gray-100 bg-gray-50/60 p-4 dark:border-dark-700 dark:bg-dark-900/20">
+                <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <div>
+                    <label class="input-label">{{ t('admin.riskControl.moderationApiKey') }}</label>
+                    <input v-model.trim="newKeyForm.api_key" data-test="new-moderation-key" type="password" class="input font-mono" autocomplete="new-password" placeholder="sk-..." @input="invalidateNewKeyTest" />
+                  </div>
+                  <div>
+                    <label class="input-label">{{ t('admin.riskControl.baseUrl') }}</label>
+                    <input v-model.trim="newKeyForm.base_url" data-test="new-moderation-base-url" type="url" class="input" placeholder="https://api.openai.com" @input="invalidateNewKeyTest" />
+                  </div>
+                  <div>
+                    <label class="input-label">{{ t('admin.riskControl.model') }}</label>
+                    <input v-model.trim="newKeyForm.model" data-test="new-moderation-model" type="text" class="input" placeholder="omni-moderation-latest" @input="invalidateNewKeyTest" />
+                  </div>
+                  <div>
+                    <label class="input-label">{{ t('admin.riskControl.proxy') }}</label>
+                    <ProxySelector v-model="newKeyForm.proxy_id" :proxies="proxies" @update:model-value="invalidateNewKeyTest" />
+                  </div>
+                </div>
+                <div class="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div class="text-xs">
+                    <span v-if="newKeyTestPassed" class="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-300"><Icon name="check" size="xs" />{{ t('admin.riskControl.keyTestPassed') }}</span>
+                    <span v-else class="text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.keyTestRequired') }}</span>
+                  </div>
+                  <div class="flex gap-2">
+                    <button type="button" data-test="test-new-moderation-key" class="btn btn-secondary inline-flex items-center gap-2" :disabled="newKeyTesting || !newKeyFormComplete" @click="testNewModerationKey">
+                      <Icon name="beaker" size="sm" :class="newKeyTesting ? 'animate-pulse' : ''" />
+                      {{ newKeyTesting ? t('admin.riskControl.testingApiKeys') : t('admin.riskControl.testConnection') }}
+                    </button>
+                    <button type="button" data-test="add-tested-moderation-key" class="btn btn-primary inline-flex items-center gap-2" :disabled="!newKeyTestPassed" @click="addTestedModerationKey">
+                      <Icon name="plus" size="sm" />{{ t('admin.riskControl.addToKeyList') }}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div v-if="editKeyForm.key_hash" class="border-b border-primary-100 bg-primary-50/40 p-4 dark:border-primary-900/40 dark:bg-primary-900/10">
+                <div class="mb-4 flex items-center justify-between gap-3">
+                  <div><p class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.riskControl.editModerationKey') }}</p><p class="mt-1 font-mono text-xs text-gray-500">{{ editKeyForm.masked }}</p></div>
+                  <button type="button" class="btn btn-secondary" @click="cancelEditModerationKey">{{ t('common.cancel') }}</button>
+                </div>
+                <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <div><label class="input-label">{{ t('admin.riskControl.baseUrl') }}</label><input v-model.trim="editKeyForm.base_url" data-test="edit-moderation-base-url" type="url" class="input" @input="invalidateEditKeyTest" /></div>
+                  <div><label class="input-label">{{ t('admin.riskControl.model') }}</label><input v-model.trim="editKeyForm.model" data-test="edit-moderation-model" type="text" class="input" @input="invalidateEditKeyTest" /></div>
+                  <div class="lg:col-span-2"><label class="input-label">{{ t('admin.riskControl.proxy') }}</label><ProxySelector v-model="editKeyForm.proxy_id" :proxies="proxies" @update:model-value="invalidateEditKeyTest" /></div>
+                </div>
+                <div class="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <span class="text-xs text-gray-500 dark:text-gray-400">{{ editKeyTestPassed ? t('admin.riskControl.keyTestPassed') : t('admin.riskControl.editKeyTestRequired') }}</span>
+                  <div class="flex gap-2">
+                    <button type="button" data-test="test-edited-moderation-key" class="btn btn-secondary" :disabled="editKeyTesting || !editKeyFormComplete" @click="testEditedModerationKey">{{ editKeyTesting ? t('admin.riskControl.testingApiKeys') : t('admin.riskControl.testConnection') }}</button>
+                    <button type="button" data-test="apply-edited-moderation-key" class="btn btn-primary" :disabled="!editKeyTestPassed" @click="applyEditedModerationKey">{{ t('admin.riskControl.applyKeyChanges') }}</button>
+                  </div>
+                </div>
+              </div>
+
+              <div v-if="moderationTargetRows.length === 0" class="px-4 py-10 text-center text-sm text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.noModerationKeys') }}</div>
+              <div v-else class="divide-y divide-gray-100 dark:divide-dark-700">
+                <div v-for="row in moderationTargetRows" :key="row.id" class="grid grid-cols-1 gap-3 px-4 py-3 lg:grid-cols-[minmax(160px,0.8fr)_minmax(220px,1.3fr)_minmax(180px,1fr)_auto] lg:items-center">
+                  <div><p class="font-mono text-sm font-semibold text-gray-900 dark:text-white">{{ row.masked }}</p><p class="mt-1 text-xs text-gray-500">{{ row.name }}</p></div>
+                  <div class="min-w-0"><p class="truncate text-sm text-gray-700 dark:text-gray-200">{{ row.base_url }}</p><p class="mt-1 text-xs text-gray-500">OpenAI Base URL</p></div>
+                  <div><p class="text-sm text-gray-700 dark:text-gray-200">{{ row.model }}</p><p class="mt-1 text-xs text-gray-500">{{ row.proxy_label }}</p></div>
+                  <div class="flex items-center gap-2">
+                    <span class="inline-flex w-fit items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium" :class="row.pending ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300'"><span class="h-1.5 w-1.5 rounded-full" :class="row.pending ? 'bg-amber-500' : 'bg-emerald-500'"></span>{{ row.pending ? t('admin.riskControl.pendingSave') : t('admin.riskControl.savedKey') }}</span>
+                    <button v-if="row.key_hash" type="button" class="btn btn-secondary px-2 py-1 text-xs" :data-test="`edit-moderation-key-${row.key_hash}`" @click="beginEditModerationKey(row)">{{ t('common.edit') }}</button>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <div v-if="false" class="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-800">
               <div class="flex flex-col gap-4 border-b border-gray-100 bg-gray-50 px-4 py-4 dark:border-dark-700 dark:bg-dark-800/60 lg:flex-row lg:items-center lg:justify-between">
                 <div class="flex items-start gap-3">
                   <span class="mt-0.5 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-primary-50 text-primary-600 dark:bg-primary-900/30 dark:text-primary-300">
@@ -667,20 +749,20 @@
                       <div>
                         <p class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.riskControl.auditTestResult') }}</p>
                         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                          {{ t('admin.riskControl.auditTestHighest', { category: moderationTestResult.highest_category || '-', score: percent(moderationTestResult.highest_score) }) }}
+                          {{ t('admin.riskControl.auditTestHighest', { category: moderationTestResult?.highest_category || '-', score: percent(moderationTestResult?.highest_score || 0) }) }}
                         </p>
                       </div>
-                      <span class="inline-flex rounded-full px-2 py-1 text-xs font-medium" :class="moderationTestResult.flagged ? 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300'">
-                        {{ moderationTestResult.flagged ? t('admin.riskControl.auditTestFlagged') : t('admin.riskControl.auditTestPassed') }}
+                      <span class="inline-flex rounded-full px-2 py-1 text-xs font-medium" :class="moderationTestResult?.flagged ? 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300'">
+                        {{ moderationTestResult?.flagged ? t('admin.riskControl.auditTestFlagged') : t('admin.riskControl.auditTestPassed') }}
                       </span>
                     </div>
                     <div class="mt-3">
                       <div class="mb-2 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
                         <span>{{ t('admin.riskControl.auditTestComposite') }}</span>
-                        <span class="font-semibold text-gray-900 dark:text-white">{{ percent(moderationTestResult.composite_score) }}</span>
+                        <span class="font-semibold text-gray-900 dark:text-white">{{ percent(moderationTestResult?.composite_score || 0) }}</span>
                       </div>
                       <div class="h-2 overflow-hidden rounded-full bg-gray-100 dark:bg-dark-700">
-                        <div class="h-full rounded-full" :class="moderationTestResult.flagged ? 'bg-red-500' : 'bg-emerald-500'" :style="{ width: percentWidth(moderationTestResult.composite_score) }"></div>
+                        <div class="h-full rounded-full" :class="moderationTestResult?.flagged ? 'bg-red-500' : 'bg-emerald-500'" :style="{ width: percentWidth(moderationTestResult?.composite_score || 0) }"></div>
                       </div>
                     </div>
                     <div class="mt-3 max-h-52 space-y-2 overflow-y-auto pr-1">
@@ -698,6 +780,55 @@
                 </div>
               </div>
             </div>
+
+            <section v-if="false" class="space-y-3">
+              <div class="flex items-center justify-between gap-4">
+                <div>
+                  <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.riskControl.additionalEndpoints') }}</h3>
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.additionalEndpointsHint') }}</p>
+                </div>
+                <button type="button" data-test="add-moderation-endpoint" class="btn btn-secondary inline-flex items-center gap-2" @click="addModerationEndpoint">
+                  <Icon name="plus" size="sm" />
+                  {{ t('admin.riskControl.addEndpoint') }}
+                </button>
+              </div>
+              <div v-for="(endpoint, endpointIndex) in additionalEndpointForms" :key="endpoint.id" class="rounded-lg border border-gray-200 p-4 dark:border-dark-700">
+                <div class="mb-4 flex items-center justify-between gap-3">
+                  <div class="flex items-center gap-3">
+                    <Toggle v-model="endpoint.enabled" />
+                    <span class="text-sm font-medium text-gray-900 dark:text-white">{{ endpoint.name || t('admin.riskControl.newEndpoint') }}</span>
+                    <span v-if="endpoint.api_key_count > 0" class="rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-500 dark:bg-dark-700 dark:text-gray-300">{{ t('admin.riskControl.storedApiKeyCount', { count: endpoint.api_key_count }) }}</span>
+                  </div>
+                  <button type="button" class="icon-btn text-red-500" :title="t('common.delete')" @click="removeModerationEndpoint(endpointIndex)"><Icon name="trash" size="sm" /></button>
+                </div>
+                <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <div>
+                    <label class="input-label">{{ t('admin.riskControl.endpointName') }}</label>
+                    <input v-model.trim="endpoint.name" :data-test="`moderation-endpoint-name-${endpointIndex}`" type="text" class="input" :placeholder="t('admin.riskControl.endpointNamePlaceholder')" />
+                  </div>
+                  <div>
+                    <label class="input-label">{{ t('admin.riskControl.baseUrl') }}</label>
+                    <input v-model.trim="endpoint.base_url" :data-test="`moderation-endpoint-url-${endpointIndex}`" type="url" class="input" placeholder="https://api.openai.com" />
+                  </div>
+                  <div>
+                    <label class="input-label">{{ t('admin.riskControl.model') }}</label>
+                    <input v-model.trim="endpoint.model" type="text" class="input" placeholder="omni-moderation-latest" />
+                  </div>
+                  <div>
+                    <label class="input-label">{{ t('admin.riskControl.proxy') }}</label>
+                    <ProxySelector v-model="endpoint.proxy_id" :proxies="proxies" />
+                  </div>
+                  <div class="lg:col-span-2">
+                    <label class="input-label">{{ t('admin.riskControl.endpointApiKeys') }}</label>
+                    <textarea v-model="endpoint.api_keys_text" :data-test="`moderation-endpoint-keys-${endpointIndex}`" class="input min-h-28 resize-y font-mono text-sm" :placeholder="t('admin.riskControl.endpointApiKeysPlaceholder')" autocomplete="new-password"></textarea>
+                    <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.endpointApiKeysHint') }}</p>
+                    <div v-if="endpoint.api_key_masks.length > 0" class="mt-2 flex flex-wrap gap-2">
+                      <span v-for="mask in endpoint.api_key_masks" :key="mask" class="rounded bg-gray-100 px-2 py-1 font-mono text-xs text-gray-500 dark:bg-dark-700 dark:text-gray-300">{{ mask }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
           </div>
 
           <div v-else-if="activeSettingsTab === 'scope'" class="space-y-5">
@@ -1134,6 +1265,7 @@ import type {
   ContentModerationAPIKeyLoad,
   ContentModerationAPIKeyStatus,
   ContentModerationConfig,
+  ContentModerationEndpoint,
   ContentModerationLog,
   ContentModerationModelFilter,
   ContentModerationModelFilterType,
@@ -1172,6 +1304,30 @@ type RiskThresholdRow = {
   category: string
   value: number
   defaultValue: number
+}
+type ModerationEndpointForm = {
+  id: string
+  name: string
+  base_url: string
+  model: string
+  proxy_id: number | null
+  enabled: boolean
+  api_keys_text: string
+  api_key_count: number
+  api_key_masks: string[]
+  api_key_statuses: ContentModerationAPIKeyStatus[]
+}
+type ModerationTargetRow = {
+  id: string
+  name: string
+  masked: string
+  base_url: string
+  model: string
+  proxy_label: string
+  proxy_id: number | null
+  endpoint_id: string
+  key_hash: string
+  pending: boolean
 }
 
 const maxModerationTestImages = 1
@@ -1215,6 +1371,26 @@ const proxies = ref<Proxy[]>([])
 const logs = ref<ContentModerationLog[]>([])
 const status = ref<ContentModerationRuntimeStatus | null>(null)
 const testedApiKeyStatuses = ref<ContentModerationAPIKeyStatus[]>([])
+const additionalEndpointForms = ref<ModerationEndpointForm[]>([])
+const newKeyFormOpen = ref(false)
+const newKeyTesting = ref(false)
+const newKeyTestSignature = ref('')
+const newKeyForm = reactive({
+  api_key: '',
+  base_url: 'https://api.openai.com',
+  model: 'omni-moderation-latest',
+  proxy_id: null as number | null,
+})
+const editKeyTesting = ref(false)
+const editKeyTestSignature = ref('')
+const editKeyForm = reactive({
+  key_hash: '',
+  masked: '',
+  base_url: '',
+  model: '',
+  proxy_id: null as number | null,
+})
+const pendingKeyMoves = ref<Array<{ key_hash: string; target_endpoint_id: string }>>([])
 const pendingDeleteApiKeyHashes = ref<string[]>([])
 const apiKeyRowsExpanded = ref<boolean>(false)
 const moderationTestPrompt = ref('')
@@ -1441,6 +1617,79 @@ const inputApiKeyCount = computed(() => parseApiKeys(configForm.api_keys_text).l
 const blockedKeywordList = computed(() => parseBlockedKeywords(configForm.blocked_keywords_text))
 
 const blockedKeywordCount = computed(() => blockedKeywordList.value.length)
+
+const newKeyFormComplete = computed(() => Boolean(
+  newKeyForm.api_key.trim() && newKeyForm.base_url.trim() && newKeyForm.model.trim()
+))
+
+const currentNewKeySignature = computed(() => JSON.stringify({
+  api_key: newKeyForm.api_key.trim(),
+  base_url: newKeyForm.base_url.trim().replace(/\/+$/, ''),
+  model: newKeyForm.model.trim(),
+  proxy_id: newKeyForm.proxy_id ?? 0,
+}))
+
+const newKeyTestPassed = computed(() => (
+  newKeyFormComplete.value && newKeyTestSignature.value === currentNewKeySignature.value
+))
+
+const editKeyFormComplete = computed(() => Boolean(
+  editKeyForm.key_hash && editKeyForm.base_url.trim() && editKeyForm.model.trim()
+))
+
+const currentEditKeySignature = computed(() => JSON.stringify({
+  key_hash: editKeyForm.key_hash,
+  base_url: editKeyForm.base_url.trim().replace(/\/+$/, ''),
+  model: editKeyForm.model.trim(),
+  proxy_id: editKeyForm.proxy_id ?? 0,
+}))
+
+const editKeyTestPassed = computed(() => (
+  editKeyFormComplete.value && editKeyTestSignature.value === currentEditKeySignature.value
+))
+
+const moderationTargetRows = computed<ModerationTargetRow[]>(() => {
+  const rows: ModerationTargetRow[] = []
+  const pendingTargets = new Map(pendingKeyMoves.value.map((move) => [move.key_hash, move.target_endpoint_id]))
+  const appendStoredRows = (endpointID: string, name: string, baseURL: string, model: string, proxyID: number | null, statuses: ContentModerationAPIKeyStatus[], masks: string[]) => {
+    const items = statuses.length > 0 ? statuses.map((status) => ({ masked: status.masked, key_hash: status.key_hash })) : masks.map((masked) => ({ masked, key_hash: '' }))
+    for (const item of items) {
+      const targetID = pendingTargets.get(item.key_hash)
+      const target = targetID ? additionalEndpointForms.value.find((endpoint) => endpoint.id === targetID) : undefined
+      rows.push({
+        id: `${endpointID}:${item.key_hash || item.masked}`,
+        name: target?.name || name,
+        masked: item.masked,
+        base_url: target?.base_url || baseURL,
+        model: target?.model || model,
+        proxy_label: moderationProxyLabel(target?.proxy_id ?? proxyID),
+        proxy_id: target?.proxy_id ?? proxyID,
+        endpoint_id: target?.id || endpointID,
+        key_hash: item.key_hash,
+        pending: Boolean(target),
+      })
+    }
+  }
+  appendStoredRows('default', 'OpenAI', configForm.base_url, configForm.model, configForm.proxy_id, configForm.api_key_statuses, configForm.api_key_masks)
+  for (const endpoint of additionalEndpointForms.value) {
+    appendStoredRows(endpoint.id, endpoint.name, endpoint.base_url, endpoint.model, endpoint.proxy_id, endpoint.api_key_statuses, endpoint.api_key_masks)
+    for (const key of parseApiKeys(endpoint.api_keys_text)) {
+      rows.push({
+        id: `${endpoint.id}:pending:${key}`,
+        name: endpoint.name,
+        masked: maskModerationKey(key),
+        base_url: endpoint.base_url,
+        model: endpoint.model,
+        proxy_label: moderationProxyLabel(endpoint.proxy_id),
+        proxy_id: endpoint.proxy_id,
+        endpoint_id: endpoint.id,
+        key_hash: '',
+        pending: true,
+      })
+    }
+  }
+  return rows
+})
 
 const pendingDeletedApiKeyCount = computed(() => pendingDeleteApiKeyHashes.value.length)
 
@@ -1698,18 +1947,199 @@ const runtimeBadgeClass = computed(() => {
   return 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300'
 })
 
+function endpointViewToForm(endpoint: ContentModerationEndpoint): ModerationEndpointForm {
+  return {
+    id: endpoint.id,
+    name: endpoint.name,
+    base_url: endpoint.base_url,
+    model: endpoint.model || 'omni-moderation-latest',
+    proxy_id: endpoint.proxy_id || null,
+    enabled: endpoint.enabled,
+    api_keys_text: '',
+    api_key_count: endpoint.api_key_count || 0,
+    api_key_masks: Array.isArray(endpoint.api_key_masks) ? [...endpoint.api_key_masks] : [],
+    api_key_statuses: Array.isArray(endpoint.api_key_statuses) ? [...endpoint.api_key_statuses] : [],
+  }
+}
+
+function moderationProxyLabel(proxyID: number | null): string {
+  if (!proxyID) return t('admin.riskControl.directConnection')
+  const proxy = proxies.value.find((item) => item.id === proxyID)
+  return proxy?.name || t('admin.riskControl.proxyID', { id: proxyID })
+}
+
+function maskModerationKey(key: string): string {
+  const value = key.trim()
+  if (value.length <= 8) return '***'
+  return `${value.slice(0, 3)}...${value.slice(-4)}`
+}
+
+function invalidateNewKeyTest() {
+  newKeyTestSignature.value = ''
+}
+
+function invalidateEditKeyTest() {
+  editKeyTestSignature.value = ''
+}
+
+function beginEditModerationKey(row: ModerationTargetRow) {
+  if (!row.key_hash) return
+  editKeyForm.key_hash = row.key_hash
+  editKeyForm.masked = row.masked
+  editKeyForm.base_url = row.base_url
+  editKeyForm.model = row.model
+  editKeyForm.proxy_id = row.proxy_id
+  editKeyTestSignature.value = ''
+}
+
+function cancelEditModerationKey() {
+  editKeyForm.key_hash = ''
+  editKeyTestSignature.value = ''
+}
+
+async function testEditedModerationKey() {
+  if (!editKeyFormComplete.value || editKeyTesting.value) return
+  editKeyTesting.value = true
+  editKeyTestSignature.value = ''
+  try {
+    const result = await adminAPI.riskControl.testAPIKeys({
+      api_key_hashes: [editKeyForm.key_hash],
+      base_url: editKeyForm.base_url.trim(),
+      model: editKeyForm.model.trim(),
+      proxy_id: editKeyForm.proxy_id ?? 0,
+      timeout_ms: Number(configForm.timeout_ms) || 3000,
+    })
+    if (!result.items?.some((item) => item.status === 'ok')) {
+      throw new Error(result.items?.[0]?.last_error || t('admin.riskControl.keyTestFailed'))
+    }
+    editKeyTestSignature.value = currentEditKeySignature.value
+    appStore.showSuccess(t('admin.riskControl.keyTestPassed'))
+  } catch (err: unknown) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.riskControl.keyTestFailed')))
+  } finally {
+    editKeyTesting.value = false
+  }
+}
+
+function applyEditedModerationKey() {
+  if (!editKeyTestPassed.value) return
+  let endpointName = t('admin.riskControl.moderationEndpoint')
+  try {
+    endpointName = new URL(editKeyForm.base_url).host || endpointName
+  } catch {
+    // Backend validation remains authoritative for URL normalization.
+  }
+  const endpointID = `key-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  const previousMove = pendingKeyMoves.value.find((move) => move.key_hash === editKeyForm.key_hash)
+  if (previousMove) {
+    additionalEndpointForms.value = additionalEndpointForms.value.filter((endpoint) => endpoint.id !== previousMove.target_endpoint_id)
+  }
+  additionalEndpointForms.value.push({
+    id: endpointID,
+    name: endpointName,
+    base_url: editKeyForm.base_url.trim().replace(/\/+$/, ''),
+    model: editKeyForm.model.trim(),
+    proxy_id: editKeyForm.proxy_id,
+    enabled: true,
+    api_keys_text: '',
+    api_key_count: 0,
+    api_key_masks: [],
+    api_key_statuses: [],
+  })
+  pendingKeyMoves.value = [
+    ...pendingKeyMoves.value.filter((move) => move.key_hash !== editKeyForm.key_hash),
+    { key_hash: editKeyForm.key_hash, target_endpoint_id: endpointID },
+  ]
+  cancelEditModerationKey()
+}
+
+async function testNewModerationKey() {
+  if (!newKeyFormComplete.value || newKeyTesting.value) return
+  newKeyTesting.value = true
+  newKeyTestSignature.value = ''
+  try {
+    const result = await adminAPI.riskControl.testAPIKeys({
+      api_keys: [newKeyForm.api_key.trim()],
+      base_url: newKeyForm.base_url.trim(),
+      model: newKeyForm.model.trim(),
+      proxy_id: newKeyForm.proxy_id ?? 0,
+      timeout_ms: Number(configForm.timeout_ms) || 3000,
+    })
+    if (!result.items?.some((item) => item.status === 'ok')) {
+      throw new Error(result.items?.[0]?.last_error || t('admin.riskControl.keyTestFailed'))
+    }
+    newKeyTestSignature.value = currentNewKeySignature.value
+    appStore.showSuccess(t('admin.riskControl.keyTestPassed'))
+  } catch (err: unknown) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.riskControl.keyTestFailed')))
+  } finally {
+    newKeyTesting.value = false
+  }
+}
+
+function addTestedModerationKey() {
+  if (!newKeyTestPassed.value) return
+  let endpointName = t('admin.riskControl.moderationEndpoint')
+  try {
+    endpointName = new URL(newKeyForm.base_url).host || endpointName
+  } catch {
+    // Backend validation remains authoritative for URL normalization.
+  }
+  additionalEndpointForms.value.push({
+    id: `key-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    name: endpointName,
+    base_url: newKeyForm.base_url.trim().replace(/\/+$/, ''),
+    model: newKeyForm.model.trim(),
+    proxy_id: newKeyForm.proxy_id,
+    enabled: true,
+    api_keys_text: newKeyForm.api_key.trim(),
+    api_key_count: 0,
+    api_key_masks: [],
+    api_key_statuses: [],
+  })
+  newKeyForm.api_key = ''
+  newKeyTestSignature.value = ''
+  newKeyFormOpen.value = false
+}
+
+function addModerationEndpoint() {
+  additionalEndpointForms.value.push({
+    id: `endpoint-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    name: '',
+    base_url: '',
+    model: 'omni-moderation-latest',
+    proxy_id: null,
+    enabled: true,
+    api_keys_text: '',
+    api_key_count: 0,
+    api_key_masks: [],
+    api_key_statuses: [],
+  })
+}
+
+function removeModerationEndpoint(index: number) {
+  additionalEndpointForms.value.splice(index, 1)
+}
+
 function applyConfig(config: ContentModerationConfig) {
+  const configuredEndpoints = Array.isArray(config.moderation_endpoints) ? config.moderation_endpoints : []
+  const defaultEndpoint = configuredEndpoints.find((endpoint) => endpoint.id === 'default')
   configForm.enabled = config.enabled
   configForm.mode = config.mode
-  configForm.base_url = config.base_url || 'https://api.openai.com'
-  configForm.model = config.model || 'omni-moderation-latest'
-  configForm.proxy_id = config.proxy_id || null
+  configForm.base_url = defaultEndpoint?.base_url || config.base_url || 'https://api.openai.com'
+  configForm.model = defaultEndpoint?.model || config.model || 'omni-moderation-latest'
+  configForm.proxy_id = defaultEndpoint?.proxy_id || config.proxy_id || null
   configForm.api_keys_text = ''
-  configForm.api_key_configured = config.api_key_configured
+  configForm.api_key_configured = defaultEndpoint ? defaultEndpoint.api_key_count > 0 : config.api_key_configured
   configForm.api_key_masked = config.api_key_masked || ''
-  configForm.api_key_count = config.api_key_count || 0
-  configForm.api_key_masks = Array.isArray(config.api_key_masks) ? [...config.api_key_masks] : []
-  configForm.api_key_statuses = Array.isArray(config.api_key_statuses) ? [...config.api_key_statuses] : []
+  configForm.api_key_count = defaultEndpoint?.api_key_count ?? config.api_key_count ?? 0
+  configForm.api_key_masks = Array.isArray(defaultEndpoint?.api_key_masks) ? [...defaultEndpoint.api_key_masks] : (Array.isArray(config.api_key_masks) ? [...config.api_key_masks] : [])
+  configForm.api_key_statuses = Array.isArray(defaultEndpoint?.api_key_statuses) ? [...defaultEndpoint.api_key_statuses] : (Array.isArray(config.api_key_statuses) ? [...config.api_key_statuses] : [])
+  additionalEndpointForms.value = configuredEndpoints
+    .filter((endpoint) => endpoint.id !== 'default')
+    .map(endpointViewToForm)
+  pendingKeyMoves.value = []
+  cancelEditModerationKey()
   configForm.api_keys_mode = 'append'
   configForm.clear_api_key = false
   pendingDeleteApiKeyHashes.value = []
@@ -1755,8 +2185,8 @@ async function loadAll() {
     groups.value = groupItems
     status.value = runtimeStatus
     proxies.value = proxyItems
-    if (Array.isArray(runtimeStatus.api_key_statuses)) {
-      configForm.api_key_statuses = [...runtimeStatus.api_key_statuses]
+    if (Array.isArray(runtimeStatus.api_key_statuses) && runtimeStatus.api_key_statuses.length > 0) {
+      configForm.api_key_statuses = runtimeStatus.api_key_statuses.filter((item) => !item.endpoint_id || item.endpoint_id === 'default')
       prunePendingDeleteAPIKeyHashes()
     }
     await loadLogs()
@@ -1772,8 +2202,8 @@ async function loadStatus(silent = true) {
   try {
     const runtimeStatus = await adminAPI.riskControl.getStatus()
     status.value = runtimeStatus
-    if (Array.isArray(runtimeStatus.api_key_statuses)) {
-      configForm.api_key_statuses = [...runtimeStatus.api_key_statuses]
+    if (Array.isArray(runtimeStatus.api_key_statuses) && runtimeStatus.api_key_statuses.length > 0) {
+      configForm.api_key_statuses = runtimeStatus.api_key_statuses.filter((item) => !item.endpoint_id || item.endpoint_id === 'default')
       prunePendingDeleteAPIKeyHashes()
     }
   } catch (err: unknown) {
@@ -1791,6 +2221,10 @@ async function saveConfig() {
     const modelFilterPayload = buildModelFilterPayload()
     if (modelFilterPayload.type !== 'all' && modelFilterPayload.models.length === 0) {
       appStore.showError(t('admin.riskControl.modelFilterModelsRequired'))
+      return
+    }
+    if (additionalEndpointForms.value.some((endpoint) => !endpoint.name.trim() || !endpoint.base_url.trim() || !endpoint.model.trim())) {
+      appStore.showError(t('admin.riskControl.endpointFieldsRequired'))
       return
     }
     const payload: UpdateContentModerationConfig = {
@@ -1837,6 +2271,30 @@ async function saveConfig() {
     if (!payload.clear_api_key && configForm.api_keys_mode !== 'replace' && pendingDeleteApiKeyHashes.value.length > 0) {
       payload.delete_api_key_hashes = [...pendingDeleteApiKeyHashes.value]
     }
+    const defaultEndpointPayload = {
+      id: 'default',
+      name: 'OpenAI',
+      base_url: configForm.base_url,
+      model: configForm.model,
+      proxy_id: configForm.proxy_id ?? 0,
+      enabled: true,
+      ...(configForm.clear_api_key || configForm.api_keys_mode === 'replace' ? { api_keys: configForm.clear_api_key ? [] : keys } : {}),
+      ...(!configForm.clear_api_key && configForm.api_keys_mode === 'append' && keys.length > 0 ? { add_api_keys: keys } : {}),
+      ...(!configForm.clear_api_key && configForm.api_keys_mode === 'append' && pendingDeleteApiKeyHashes.value.length > 0 ? { delete_api_key_hashes: [...pendingDeleteApiKeyHashes.value] } : {}),
+    }
+    payload.moderation_endpoints = [
+      defaultEndpointPayload,
+      ...additionalEndpointForms.value.map((endpoint) => ({
+        id: endpoint.id,
+        name: endpoint.name.trim(),
+        base_url: endpoint.base_url.trim(),
+        model: endpoint.model.trim(),
+        proxy_id: endpoint.proxy_id ?? 0,
+        enabled: endpoint.enabled,
+        ...(parseApiKeys(endpoint.api_keys_text).length > 0 ? { add_api_keys: parseApiKeys(endpoint.api_keys_text) } : {}),
+      })),
+    ]
+    payload.api_key_moves = [...pendingKeyMoves.value]
 
     const updated = await adminAPI.riskControl.updateConfig(payload)
     applyConfig(updated)

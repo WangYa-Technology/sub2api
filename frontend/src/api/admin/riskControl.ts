@@ -20,6 +20,7 @@ export interface ContentModerationConfig {
   api_key_count: number
   api_key_masks: string[]
   api_key_statuses: ContentModerationAPIKeyStatus[]
+  moderation_endpoints?: ContentModerationEndpoint[]
   timeout_ms: number
   sample_rate: number
   all_groups: boolean
@@ -48,6 +49,8 @@ export type ContentModerationAPIKeyStatusValue = 'unknown' | 'ok' | 'error' | 'f
 
 export interface ContentModerationAPIKeyStatus {
   index: number
+  endpoint_id?: string
+  endpoint_name?: string
   key_hash: string
   masked: string
   status: ContentModerationAPIKeyStatusValue
@@ -62,8 +65,33 @@ export interface ContentModerationAPIKeyStatus {
   configured: boolean
 }
 
+export interface ContentModerationEndpoint {
+  id: string
+  name: string
+  base_url: string
+  model: string
+  proxy_id: number | null
+  enabled: boolean
+  api_key_count: number
+  api_key_masks: string[]
+  api_key_statuses: ContentModerationAPIKeyStatus[]
+}
+
+export interface UpdateContentModerationEndpoint {
+  id: string
+  name: string
+  base_url: string
+  model: string
+  proxy_id: number
+  enabled: boolean
+  api_keys?: string[]
+  add_api_keys?: string[]
+  delete_api_key_hashes?: string[]
+}
+
 export interface TestContentModerationAPIKeysPayload {
   api_keys?: string[]
+  api_key_hashes?: string[]
   base_url?: string
   model?: string
   timeout_ms?: number
@@ -100,6 +128,8 @@ export interface UpdateContentModerationConfig {
   api_keys_mode?: 'append' | 'replace'
   delete_api_key_hashes?: string[]
   clear_api_key?: boolean
+  moderation_endpoints?: UpdateContentModerationEndpoint[]
+  api_key_moves?: ContentModerationAPIKeyMove[]
   timeout_ms?: number
   sample_rate?: number
   all_groups?: boolean
@@ -124,7 +154,14 @@ export interface UpdateContentModerationConfig {
   cyber_policy_exclude_from_ban_count?: boolean
 }
 
+export interface ContentModerationAPIKeyMove {
+  key_hash: string
+  target_endpoint_id: string
+}
+
 export interface ContentModerationRuntimeStatus {
+  node_id: string
+  metrics_scope: 'local'
   enabled: boolean
   risk_control_enabled: boolean
   mode: ModerationMode
@@ -158,6 +195,8 @@ export interface ContentModerationRuntimeStatus {
 
 export interface ContentModerationAPIKeyLoad {
   index: number
+  endpoint_id?: string
+  endpoint_name?: string
   key_hash: string
   masked: string
   status: ContentModerationAPIKeyStatusValue

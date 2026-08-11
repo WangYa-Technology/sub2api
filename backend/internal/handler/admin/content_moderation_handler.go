@@ -25,26 +25,28 @@ type contentModerationConfigRequest struct {
 	BaseURL *string `json:"base_url"`
 	Model   *string `json:"model"`
 	// 审计请求使用的代理服务器：null 不修改；0 清除（直连）；>0 指定代理。
-	ProxyID              *int64              `json:"proxy_id"`
-	APIKey               *string             `json:"api_key"`
-	APIKeys              *[]string           `json:"api_keys"`
-	APIKeysMode          string              `json:"api_keys_mode"`
-	DeleteAPIKeyHashes   *[]string           `json:"delete_api_key_hashes"`
-	ClearAPIKey          bool                `json:"clear_api_key"`
-	TimeoutMS            *int                `json:"timeout_ms"`
-	SampleRate           *int                `json:"sample_rate"`
-	AllGroups            *bool               `json:"all_groups"`
-	GroupIDs             *[]int64            `json:"group_ids"`
-	RecordNonHits        *bool               `json:"record_non_hits"`
-	Thresholds           *map[string]float64 `json:"thresholds"`
-	WorkerCount          *int                `json:"worker_count"`
-	QueueSize            *int                `json:"queue_size"`
-	BlockStatus          *int                `json:"block_status"`
-	BlockMessage         *string             `json:"block_message"`
-	EmailOnHit           *bool               `json:"email_on_hit"`
-	AutoBanEnabled       *bool               `json:"auto_ban_enabled"`
-	BanThreshold         *int                `json:"ban_threshold"`
-	ViolationWindowHours *int                `json:"violation_window_hours"`
+	ProxyID              *int64                                     `json:"proxy_id"`
+	APIKey               *string                                    `json:"api_key"`
+	APIKeys              *[]string                                  `json:"api_keys"`
+	APIKeysMode          string                                     `json:"api_keys_mode"`
+	DeleteAPIKeyHashes   *[]string                                  `json:"delete_api_key_hashes"`
+	ClearAPIKey          bool                                       `json:"clear_api_key"`
+	ModerationEndpoints  *[]service.UpdateContentModerationEndpoint `json:"moderation_endpoints"`
+	APIKeyMoves          []service.ContentModerationAPIKeyMove      `json:"api_key_moves"`
+	TimeoutMS            *int                                       `json:"timeout_ms"`
+	SampleRate           *int                                       `json:"sample_rate"`
+	AllGroups            *bool                                      `json:"all_groups"`
+	GroupIDs             *[]int64                                   `json:"group_ids"`
+	RecordNonHits        *bool                                      `json:"record_non_hits"`
+	Thresholds           *map[string]float64                        `json:"thresholds"`
+	WorkerCount          *int                                       `json:"worker_count"`
+	QueueSize            *int                                       `json:"queue_size"`
+	BlockStatus          *int                                       `json:"block_status"`
+	BlockMessage         *string                                    `json:"block_message"`
+	EmailOnHit           *bool                                      `json:"email_on_hit"`
+	AutoBanEnabled       *bool                                      `json:"auto_ban_enabled"`
+	BanThreshold         *int                                       `json:"ban_threshold"`
+	ViolationWindowHours *int                                       `json:"violation_window_hours"`
 	// cyber_policy 命中是否排除出自动封号计数；前端 RiskControlView 已发送该字段，
 	// service.UpdateContentModerationConfigInput 已支持，此前 handler 层缺透传导致开关静默失效。
 	CyberPolicyExcludeFromBanCount *bool                                 `json:"cyber_policy_exclude_from_ban_count"`
@@ -58,13 +60,14 @@ type contentModerationConfigRequest struct {
 }
 
 type contentModerationAPIKeyTestRequest struct {
-	APIKeys   []string `json:"api_keys"`
-	BaseURL   string   `json:"base_url"`
-	Model     string   `json:"model"`
-	TimeoutMS int      `json:"timeout_ms"`
-	ProxyID   *int64   `json:"proxy_id"`
-	Prompt    string   `json:"prompt"`
-	Images    []string `json:"images"`
+	APIKeys      []string `json:"api_keys"`
+	APIKeyHashes []string `json:"api_key_hashes"`
+	BaseURL      string   `json:"base_url"`
+	Model        string   `json:"model"`
+	TimeoutMS    int      `json:"timeout_ms"`
+	ProxyID      *int64   `json:"proxy_id"`
+	Prompt       string   `json:"prompt"`
+	Images       []string `json:"images"`
 }
 
 type contentModerationHashRequest struct {
@@ -97,6 +100,8 @@ func (h *ContentModerationHandler) UpdateConfig(c *gin.Context) {
 		APIKeysMode:                    req.APIKeysMode,
 		DeleteAPIKeyHashes:             req.DeleteAPIKeyHashes,
 		ClearAPIKey:                    req.ClearAPIKey,
+		ModerationEndpoints:            req.ModerationEndpoints,
+		APIKeyMoves:                    req.APIKeyMoves,
 		TimeoutMS:                      req.TimeoutMS,
 		SampleRate:                     req.SampleRate,
 		AllGroups:                      req.AllGroups,
@@ -134,13 +139,14 @@ func (h *ContentModerationHandler) TestAPIKeys(c *gin.Context) {
 		return
 	}
 	result, err := h.service.TestAPIKeys(c.Request.Context(), service.TestContentModerationAPIKeysInput{
-		APIKeys:   req.APIKeys,
-		BaseURL:   req.BaseURL,
-		Model:     req.Model,
-		TimeoutMS: req.TimeoutMS,
-		ProxyID:   req.ProxyID,
-		Prompt:    req.Prompt,
-		Images:    req.Images,
+		APIKeys:      req.APIKeys,
+		APIKeyHashes: req.APIKeyHashes,
+		BaseURL:      req.BaseURL,
+		Model:        req.Model,
+		TimeoutMS:    req.TimeoutMS,
+		ProxyID:      req.ProxyID,
+		Prompt:       req.Prompt,
+		Images:       req.Images,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)

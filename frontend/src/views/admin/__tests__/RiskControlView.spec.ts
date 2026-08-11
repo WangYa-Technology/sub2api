@@ -11,6 +11,7 @@ const {
   updateConfig,
   getStatus,
   listLogs,
+  testAPIKeys,
   getGroups,
   getProxies,
   showError,
@@ -20,6 +21,7 @@ const {
   updateConfig: vi.fn(),
   getStatus: vi.fn(),
   listLogs: vi.fn(),
+  testAPIKeys: vi.fn(),
   getGroups: vi.fn(),
   getProxies: vi.fn(),
   showError: vi.fn(),
@@ -33,7 +35,7 @@ vi.mock('@/api/admin', () => ({
       updateConfig,
       getStatus,
       listLogs,
-      testAPIKeys: vi.fn(),
+      testAPIKeys,
       deleteFlaggedHash: vi.fn(),
       clearFlaggedHashes: vi.fn(),
       unbanUser: vi.fn(),
@@ -196,6 +198,7 @@ describe('admin RiskControlView', () => {
     updateConfig.mockReset()
     getStatus.mockReset()
     listLogs.mockReset()
+    testAPIKeys.mockReset()
     getGroups.mockReset()
     showError.mockReset()
     showSuccess.mockReset()
@@ -203,6 +206,10 @@ describe('admin RiskControlView', () => {
     getConfig.mockResolvedValue(baseConfig())
     getStatus.mockResolvedValue(runtimeStatus())
     listLogs.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, pages: 1 })
+    testAPIKeys.mockResolvedValue({
+      items: [{ status: 'ok', last_error: '' }],
+      image_count: 0,
+    })
     getGroups.mockResolvedValue([])
     getProxies.mockResolvedValue([])
     updateConfig.mockImplementation(async (payload: UpdateContentModerationConfig) => ({
@@ -283,6 +290,91 @@ describe('admin RiskControlView', () => {
       }),
     }))
     expect(showError).not.toHaveBeenCalled()
+  })
+
+  it('requires a successful test before adding a key target', async () => {
+    const wrapper = mount(RiskControlView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          BaseDialog: BaseDialogStub,
+          Icon: true,
+          Select: true,
+          Toggle: true,
+          Pagination: true,
+          ModelWhitelistSelector: ModelWhitelistSelectorStub,
+          ProxySelector: true,
+        },
+      },
+    })
+
+    await flushPromises()
+    await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
+    await findButtonByText(wrapper, 'admin.riskControl.addModerationKey').trigger('click')
+    await wrapper.get('[data-test="new-moderation-key"]').setValue('sk-backup-a')
+    await wrapper.get('[data-test="new-moderation-base-url"]').setValue('https://moderation.example.com')
+    expect(wrapper.get('[data-test="add-tested-moderation-key"]').attributes('disabled')).toBeDefined()
+
+    await wrapper.get('[data-test="test-new-moderation-key"]').trigger('click')
+    await flushPromises()
+    expect(testAPIKeys).toHaveBeenCalledWith(expect.objectContaining({
+      api_keys: ['sk-backup-a'],
+      base_url: 'https://moderation.example.com',
+      model: 'omni-moderation-latest',
+    }))
+    expect(wrapper.get('[data-test="add-tested-moderation-key"]').attributes('disabled')).toBeUndefined()
+    await wrapper.get('[data-test="add-tested-moderation-key"]').trigger('click')
+    await findButtonByText(wrapper, 'admin.riskControl.saveConfig').trigger('click')
+    await flushPromises()
+
+    expect(updateConfig).toHaveBeenCalledWith(expect.objectContaining({
+      moderation_endpoints: expect.arrayContaining([
+        expect.objectContaining({
+          name: 'moderation.example.com',
+          base_url: 'https://moderation.example.com',
+          model: 'omni-moderation-latest',
+          add_api_keys: ['sk-backup-a'],
+          enabled: true,
+        }),
+      ]),
+    }))
+  })
+
+  it('tests a saved key by hash before moving it to a new endpoint', async () => {
+    const keyStatus = {
+      index: 0, endpoint_id: 'default', endpoint_name: 'OpenAI', key_hash: 'saved-hash', masked: 'sk-...1234',
+      status: 'ok' as const, failure_count: 0, success_count: 1, last_error: '', last_latency_ms: 10,
+      last_http_status: 200, last_tested: false, configured: true,
+    }
+    getConfig.mockResolvedValue({
+      ...baseConfig(),
+      api_key_configured: true,
+      api_key_count: 1,
+      api_key_masks: ['sk-...1234'],
+      api_key_statuses: [keyStatus],
+      moderation_endpoints: [{
+        id: 'default', name: 'OpenAI', base_url: 'https://api.openai.com', model: 'omni-moderation-latest',
+        proxy_id: null, enabled: true, api_key_count: 1, api_key_masks: ['sk-...1234'], api_key_statuses: [keyStatus],
+      }],
+    })
+    const wrapper = mount(RiskControlView, {
+      global: { stubs: { AppLayout: AppLayoutStub, BaseDialog: BaseDialogStub, Icon: true, Select: true, Toggle: true, Pagination: true, ModelWhitelistSelector: ModelWhitelistSelectorStub, ProxySelector: true } },
+    })
+    await flushPromises()
+    await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
+    await wrapper.get('[data-test="edit-moderation-key-saved-hash"]').trigger('click')
+    await wrapper.get('[data-test="edit-moderation-base-url"]').setValue('https://new-moderation.example.com')
+    expect(wrapper.get('[data-test="apply-edited-moderation-key"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-test="test-edited-moderation-key"]').trigger('click')
+    await flushPromises()
+    expect(testAPIKeys).toHaveBeenCalledWith(expect.objectContaining({ api_key_hashes: ['saved-hash'], base_url: 'https://new-moderation.example.com' }))
+    await wrapper.get('[data-test="apply-edited-moderation-key"]').trigger('click')
+    await findButtonByText(wrapper, 'admin.riskControl.saveConfig').trigger('click')
+    await flushPromises()
+    expect(updateConfig).toHaveBeenCalledWith(expect.objectContaining({
+      api_key_moves: [expect.objectContaining({ key_hash: 'saved-hash', target_endpoint_id: expect.stringMatching(/^key-/) })],
+      moderation_endpoints: expect.arrayContaining([expect.objectContaining({ base_url: 'https://new-moderation.example.com' })]),
+    }))
   })
 
   it('describes worker runtime as async audit and pre-block record processing', async () => {

@@ -404,6 +404,27 @@ func (c *contentModerationTestHashCache) snapshotDeleted() []string {
 	return out
 }
 
+func TestMoveContentModerationAPIKeysMovesStoredSecretWithoutExposingIt(t *testing.T) {
+	key := "sk-existing-secret"
+	hash := moderationAPIKeyHash(key)
+	endpoints := []ContentModerationEndpoint{
+		{ID: "default", BaseURL: "https://api.openai.com", Model: "omni-moderation-latest", APIKeys: []string{key}, Enabled: true},
+		{ID: "custom", BaseURL: "https://moderation.example.com", Model: "moderation-v2", Enabled: true},
+	}
+
+	moved, err := moveContentModerationAPIKeys(endpoints, []ContentModerationAPIKeyMove{{KeyHash: hash, TargetEndpointID: "custom"}})
+	require.NoError(t, err)
+	require.Empty(t, moved[0].APIKeys)
+	require.Equal(t, []string{key}, moved[1].APIKeys)
+	require.Equal(t, []string{key}, endpoints[0].APIKeys, "input config must remain unchanged")
+}
+
+func TestResolveContentModerationAPIKeysByHashRejectsUnknownHash(t *testing.T) {
+	endpoints := []ContentModerationEndpoint{{ID: "default", APIKeys: []string{"sk-existing"}}}
+	_, err := resolveContentModerationAPIKeysByHash(endpoints, []string{"missing"})
+	require.Error(t, err)
+}
+
 func TestBuildContentModerationLog_RedactsInputExcerpt(t *testing.T) {
 	svc := &ContentModerationService{}
 	cfg := defaultContentModerationConfig()
@@ -822,6 +843,64 @@ func TestContentModerationUpdateConfig_AppendsAndDeletesAPIKeys(t *testing.T) {
 	var saved ContentModerationConfig
 	require.NoError(t, json.Unmarshal([]byte(repo.values[SettingKeyContentModerationConfig]), &saved))
 	require.Equal(t, []string{"sk-old-b", "sk-new-c"}, saved.apiKeys())
+}
+
+func TestContentModerationCallModeration_RotatesAcrossIndependentEndpoints(t *testing.T) {
+	var mu sync.Mutex
+	seen := make([]string, 0, 2)
+	newServer := func(label string) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			seen = append(seen, label+":"+r.Header.Get("Authorization"))
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(moderationAPIResponse{Results: []moderationAPIResult{{CategoryScores: map[string]float64{"sexual": 0.01}}}})
+		}))
+	}
+	first := newServer("first")
+	defer first.Close()
+	second := newServer("second")
+	defer second.Close()
+
+	cfg := defaultContentModerationConfig()
+	cfg.ModerationEndpoints = []ContentModerationEndpoint{
+		{ID: "first", Name: "First", BaseURL: first.URL, Model: "moderation-a", APIKeys: []string{"sk-a"}, Enabled: true},
+		{ID: "second", Name: "Second", BaseURL: second.URL, Model: "moderation-b", APIKeys: []string{"sk-b"}, Enabled: true},
+	}
+	svc := NewContentModerationService(nil, nil, nil, nil, nil, nil, nil, nil)
+
+	_, err := svc.callModeration(context.Background(), cfg, "hello")
+	require.NoError(t, err)
+	_, err = svc.callModeration(context.Background(), cfg, "hello")
+	require.NoError(t, err)
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.ElementsMatch(t, []string{"first:Bearer sk-a", "second:Bearer sk-b"}, seen)
+}
+
+func TestContentModerationUpdateConfig_PreservesEndpointKeysWhenOmitted(t *testing.T) {
+	cfg := defaultContentModerationConfig()
+	cfg.ModerationEndpoints = []ContentModerationEndpoint{{
+		ID: "provider-a", Name: "Provider A", BaseURL: "https://moderation-a.example.com", Model: "model-a",
+		APIKeys: []string{"sk-secret-a", "sk-secret-b"}, Enabled: true,
+	}}
+	rawCfg, err := json.Marshal(cfg)
+	require.NoError(t, err)
+	repo := &contentModerationTestSettingRepo{values: map[string]string{SettingKeyContentModerationConfig: string(rawCfg)}}
+	svc := NewContentModerationService(repo, nil, nil, nil, nil, nil, nil, nil)
+	updates := []UpdateContentModerationEndpoint{{
+		ID: "provider-a", Name: "Provider A renamed", BaseURL: "https://moderation-a.example.com", Model: "model-b", Enabled: true,
+	}}
+
+	view, err := svc.UpdateConfig(context.Background(), UpdateContentModerationConfigInput{ModerationEndpoints: &updates})
+	require.NoError(t, err)
+	require.Len(t, view.ModerationEndpoints, 1)
+	require.Equal(t, 2, view.ModerationEndpoints[0].APIKeyCount)
+	require.Equal(t, "Provider A renamed", view.ModerationEndpoints[0].Name)
+
+	var saved ContentModerationConfig
+	require.NoError(t, json.Unmarshal([]byte(repo.values[SettingKeyContentModerationConfig]), &saved))
+	require.Equal(t, []string{"sk-secret-a", "sk-secret-b"}, saved.ModerationEndpoints[0].APIKeys)
 }
 
 func TestContentModerationUpdateConfig_ReplacesAPIKeysWhenRequested(t *testing.T) {

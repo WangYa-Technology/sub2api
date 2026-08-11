@@ -21,6 +21,48 @@ func TestBuildContentModerationLogWhere_BlockedIncludesAllBlockActions(t *testin
 	require.NotContains(t, sql, "l.action = 'block'")
 }
 
+func TestContentModerationCleanupClaimUsesSharedPostgres(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	repo := NewContentModerationRepository(db).(*contentModerationRepository)
+	bucket := "2026-08-11"
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO settings (key, value, updated_at)")).
+		WithArgs(contentModerationCleanupClaimSettingKey, bucket).
+		WillReturnRows(sqlmock.NewRows([]string{"claimed"}).AddRow(true))
+
+	acquired, err := repo.TryClaimContentModerationCleanup(context.Background(), bucket)
+	require.NoError(t, err)
+	require.True(t, acquired)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestContentModerationUserViolationTransactionSerializesAutoBan(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	repo := NewContentModerationRepository(db).(*contentModerationRepository)
+	since := time.Now().Add(-time.Hour)
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT role, status FROM users WHERE id = $1 FOR UPDATE")).
+		WithArgs(int64(42)).
+		WillReturnRows(sqlmock.NewRows([]string{"role", "status"}).AddRow(service.RoleUser, service.StatusActive))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) + 1")).
+		WithArgs(int64(42), since, false).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(3))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE users SET status = $1, updated_at = NOW() WHERE id = $2")).
+		WithArgs(service.StatusDisabled, int64(42)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	count, applied, admin, err := repo.EvaluateContentModerationUserViolation(context.Background(), 42, since, false, true, 3)
+	require.NoError(t, err)
+	require.Equal(t, 3, count)
+	require.True(t, applied)
+	require.False(t, admin)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestContentModerationRepositoryCountFlaggedByUserSince_ExcludesHashBlock(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)

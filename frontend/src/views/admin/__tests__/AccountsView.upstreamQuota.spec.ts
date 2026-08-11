@@ -816,10 +816,10 @@ describe('admin AccountsView upstream quota state', () => {
 
   it('keeps a successful result in memory when local storage is unavailable', async () => {
     queryUpstreamQuota.mockResolvedValueOnce(quotaResult)
-    const nativeSetItem = Storage.prototype.setItem
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (key, value) {
+    const nativeSetItem = window.localStorage.setItem.bind(window.localStorage)
+    vi.spyOn(window.localStorage, 'setItem').mockImplementation((key, value) => {
       if (key === quotaCacheKey(99, 7)) throw new DOMException('storage disabled', 'SecurityError')
-      return nativeSetItem.call(this, key, value)
+      return nativeSetItem(key, value)
     })
 
     const wrapper = mountView()

@@ -161,7 +161,8 @@ export interface ContentModerationAPIKeyMove {
 
 export interface ContentModerationRuntimeStatus {
   node_id: string
-  metrics_scope: 'local'
+  metrics_scope: 'local' | 'cluster'
+  node_count: number
   enabled: boolean
   risk_control_enabled: boolean
   mode: ModerationMode

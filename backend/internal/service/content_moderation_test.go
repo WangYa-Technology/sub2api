@@ -903,6 +903,94 @@ func TestContentModerationUpdateConfig_PreservesEndpointKeysWhenOmitted(t *testi
 	require.Equal(t, []string{"sk-secret-a", "sk-secret-b"}, saved.ModerationEndpoints[0].APIKeys)
 }
 
+func TestContentModerationUpdateConfig_SyncsDefaultEndpointToLegacyFields(t *testing.T) {
+	cfg := defaultContentModerationConfig()
+	cfg.ModerationEndpoints = []ContentModerationEndpoint{
+		{ID: defaultContentModerationEndpointID, Name: "OpenAI", BaseURL: "https://old.example.com", Model: "old-model", APIKeys: []string{"sk-old"}, Enabled: true},
+		{ID: "provider-b", Name: "Provider B", BaseURL: "https://b.example.com", Model: "model-b", APIKeys: []string{"sk-b"}, Enabled: true},
+	}
+	rawCfg, err := json.Marshal(cfg)
+	require.NoError(t, err)
+	repo := &contentModerationTestSettingRepo{values: map[string]string{SettingKeyContentModerationConfig: string(rawCfg)}}
+	svc := NewContentModerationService(repo, nil, nil, nil, nil, nil, nil, nil)
+	newKeys := []string{"sk-new"}
+	updates := []UpdateContentModerationEndpoint{
+		{ID: defaultContentModerationEndpointID, Name: "OpenAI", BaseURL: "https://new.example.com", Model: "new-model", APIKeys: &newKeys, Enabled: true},
+		{ID: "provider-b", Name: "Provider B", BaseURL: "https://b.example.com", Model: "model-b", Enabled: true},
+	}
+
+	_, err = svc.UpdateConfig(context.Background(), UpdateContentModerationConfigInput{ModerationEndpoints: &updates})
+	require.NoError(t, err)
+
+	var saved ContentModerationConfig
+	require.NoError(t, json.Unmarshal([]byte(repo.values[SettingKeyContentModerationConfig]), &saved))
+	require.Equal(t, "https://new.example.com", saved.BaseURL)
+	require.Equal(t, "new-model", saved.Model)
+	require.Equal(t, []string{"sk-new"}, saved.APIKeys)
+}
+
+func TestContentModerationUpdateConfig_MovingLastDefaultKeyClearsLegacyKeys(t *testing.T) {
+	cfg := defaultContentModerationConfig()
+	cfg.APIKeys = []string{"sk-default"}
+	cfg.ModerationEndpoints = []ContentModerationEndpoint{
+		{ID: defaultContentModerationEndpointID, Name: "OpenAI", BaseURL: cfg.BaseURL, Model: cfg.Model, APIKeys: []string{"sk-default"}, Enabled: true},
+		{ID: "provider-b", Name: "Provider B", BaseURL: "https://b.example.com", Model: "model-b", Enabled: true},
+	}
+	rawCfg, err := json.Marshal(cfg)
+	require.NoError(t, err)
+	repo := &contentModerationTestSettingRepo{values: map[string]string{SettingKeyContentModerationConfig: string(rawCfg)}}
+	svc := NewContentModerationService(repo, nil, nil, nil, nil, nil, nil, nil)
+
+	_, err = svc.UpdateConfig(context.Background(), UpdateContentModerationConfigInput{APIKeyMoves: []ContentModerationAPIKeyMove{{
+		KeyHash: moderationAPIKeyHash("sk-default"), TargetEndpointID: "provider-b",
+	}}})
+	require.NoError(t, err)
+
+	var saved ContentModerationConfig
+	require.NoError(t, json.Unmarshal([]byte(repo.values[SettingKeyContentModerationConfig]), &saved))
+	require.Empty(t, saved.APIKeys)
+	require.Empty(t, saved.APIKey)
+	require.Empty(t, saved.ModerationEndpoints[0].APIKeys)
+	require.Equal(t, []string{"sk-default"}, saved.ModerationEndpoints[1].APIKeys)
+}
+
+func TestAggregateContentModerationRuntimeStatuses(t *testing.T) {
+	now := time.Now()
+	nodes := []ContentModerationNodeStatus{
+		{LastSeenAt: now, Status: &ContentModerationRuntimeStatus{
+			NodeID: "jp-01", WorkerCount: 8, ActiveWorkers: 2, IdleWorkers: 6,
+			PreBlockChecked: 2, PreBlockAvgLatencyMS: 100, PreBlockAllowed: 2,
+			PreBlockAPIKeyLoads: []ContentModerationAPIKeyLoad{{Index: 0, EndpointID: "default", KeyHash: "key-a", Masked: "***a", Status: "ok", Total: 2, Success: 2, AvgLatencyMS: 100}},
+			APIKeyStatuses:      []ContentModerationAPIKeyStatus{{Index: 0, EndpointID: "default", KeyHash: "key-a", Masked: "***a", Status: "ok", LastTested: true}},
+		}},
+		{LastSeenAt: now, Status: &ContentModerationRuntimeStatus{
+			NodeID: "us-01", WorkerCount: 8, ActiveWorkers: 1, IdleWorkers: 7,
+			PreBlockChecked: 1, PreBlockAvgLatencyMS: 400, PreBlockBlocked: 1,
+			PreBlockAPIKeyLoads: []ContentModerationAPIKeyLoad{
+				{Index: 0, EndpointID: "default", KeyHash: "key-a", Masked: "***a", Status: "frozen", Total: 1, Errors: 1, AvgLatencyMS: 400},
+				{Index: 1, EndpointID: "provider-b", KeyHash: "key-b", Masked: "***b", Status: "unknown"},
+			},
+			APIKeyStatuses: []ContentModerationAPIKeyStatus{
+				{Index: 0, EndpointID: "default", KeyHash: "key-a", Masked: "***a", Status: "frozen"},
+				{Index: 1, EndpointID: "provider-b", KeyHash: "key-b", Masked: "***b", Status: "unknown"},
+			},
+		}},
+	}
+
+	status := aggregateContentModerationRuntimeStatuses(nodes, nil)
+	require.Equal(t, "cluster", status.MetricsScope)
+	require.Equal(t, 2, status.NodeCount)
+	require.Equal(t, 16, status.WorkerCount)
+	require.Equal(t, 3, status.ActiveWorkers)
+	require.Equal(t, int64(3), status.PreBlockChecked)
+	require.Equal(t, int64(200), status.PreBlockAvgLatencyMS)
+	require.Len(t, status.PreBlockAPIKeyLoads, 2)
+	require.Equal(t, int64(3), status.PreBlockAPIKeyLoads[0].Total)
+	require.Equal(t, int64(200), status.PreBlockAPIKeyLoads[0].AvgLatencyMS)
+	require.Equal(t, "ok", status.PreBlockAPIKeyLoads[0].Status)
+	require.Equal(t, int64(2), status.PreBlockAPIKeyAvailableCount)
+}
+
 func TestContentModerationUpdateConfig_ReplacesAPIKeysWhenRequested(t *testing.T) {
 	cfg := defaultContentModerationConfig()
 	cfg.APIKeys = []string{"sk-old-a", "sk-old-b"}

@@ -47,17 +47,25 @@ func TestContentModerationUserViolationTransactionSerializesAutoBan(t *testing.T
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT role, status FROM users WHERE id = $1 FOR UPDATE")).
 		WithArgs(int64(42)).
 		WillReturnRows(sqlmock.NewRows([]string{"role", "status"}).AddRow(service.RoleUser, service.StatusActive))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) + 1")).
+	mock.ExpectQuery("INSERT INTO content_moderation_logs").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(99), time.Now()))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*)")).
 		WithArgs(int64(42), since, false).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(3))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE users SET status = $1, updated_at = NOW() WHERE id = $2")).
 		WithArgs(service.StatusDisabled, int64(42)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE content_moderation_logs SET violation_count = $1, auto_banned = $2 WHERE id = $3")).
+		WithArgs(3, true, int64(99)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
-	count, applied, admin, err := repo.EvaluateContentModerationUserViolation(context.Background(), 42, since, false, true, 3)
+	userID := int64(42)
+	log := &service.ContentModerationLog{UserID: &userID, Flagged: true, CategoryScores: map[string]float64{}, ThresholdSnapshot: map[string]float64{}}
+	applied, admin, err := repo.PersistContentModerationFlaggedLog(context.Background(), log, since, false, true, 3)
 	require.NoError(t, err)
-	require.Equal(t, 3, count)
+	require.Equal(t, 3, log.ViolationCount)
+	require.True(t, log.AutoBanned)
 	require.True(t, applied)
 	require.False(t, admin)
 	require.NoError(t, mock.ExpectationsWereMet())

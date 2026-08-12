@@ -383,6 +383,7 @@ export default {
       emptyLogs: '暂无审核记录',
       preBlockSyncStatus: '前置拦截同步状态',
       currentNode: '当前节点：{node}',
+      clusterNodes: '集群节点：{count}',
       preBlockSyncHint: '同步审核链路的实时计数，不包含异步写记录任务。',
       preBlockActive: '同步处理中',
       preBlockActiveHint: '当前正在审核',

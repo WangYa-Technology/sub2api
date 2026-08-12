@@ -490,6 +490,7 @@ type ContentModerationCleanupResult struct {
 type ContentModerationRuntimeStatus struct {
 	NodeID                       string                          `json:"node_id"`
 	MetricsScope                 string                          `json:"metrics_scope"`
+	NodeCount                    int                             `json:"node_count"`
 	Enabled                      bool                            `json:"enabled"`
 	RiskControlEnabled           bool                            `json:"risk_control_enabled"`
 	Mode                         string                          `json:"mode"`
@@ -559,7 +560,17 @@ type ContentModerationHashCache interface {
 type ContentModerationClusterCoordinator interface {
 	TryClaimContentModerationCleanup(ctx context.Context, bucket string) (bool, error)
 	ReleaseContentModerationCleanupClaim(ctx context.Context, bucket string) error
-	EvaluateContentModerationUserViolation(ctx context.Context, userID int64, since time.Time, excludeCyberPolicy bool, autoBanEnabled bool, banThreshold int) (count int, autoBanApplied bool, admin bool, err error)
+	PersistContentModerationFlaggedLog(ctx context.Context, log *ContentModerationLog, since time.Time, excludeCyberPolicy bool, autoBanEnabled bool, banThreshold int) (autoBanApplied bool, admin bool, err error)
+}
+
+type ContentModerationNodeStatus struct {
+	Status     *ContentModerationRuntimeStatus
+	LastSeenAt time.Time
+}
+
+type ContentModerationClusterMetricsRepository interface {
+	UpsertContentModerationNodeStatus(ctx context.Context, nodeID string, status *ContentModerationRuntimeStatus) error
+	ListContentModerationNodeStatuses(ctx context.Context, seenSince time.Time) ([]ContentModerationNodeStatus, error)
 }
 
 type ContentModerationService struct {
@@ -664,6 +675,9 @@ func NewContentModerationService(
 			go svc.worker(i)
 		}
 		go svc.cleanupWorker()
+		if _, ok := repo.(ContentModerationClusterMetricsRepository); ok {
+			go svc.clusterMetricsWorker()
+		}
 	}
 	return svc
 }
@@ -1472,6 +1486,27 @@ func (s *ContentModerationService) ClearFlaggedInputHashes(ctx context.Context) 
 }
 
 func (s *ContentModerationService) GetStatus(ctx context.Context) (*ContentModerationRuntimeStatus, error) {
+	local, err := s.getLocalStatus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	metricsRepo, ok := s.repo.(ContentModerationClusterMetricsRepository)
+	if !ok {
+		return local, nil
+	}
+	if err := metricsRepo.UpsertContentModerationNodeStatus(ctx, local.NodeID, local); err != nil {
+		slog.Warn("content_moderation.cluster_status_upsert_failed", "node_id", local.NodeID, "error", err)
+		return local, nil
+	}
+	nodes, err := metricsRepo.ListContentModerationNodeStatuses(ctx, time.Now().Add(-20*time.Second))
+	if err != nil {
+		slog.Warn("content_moderation.cluster_status_list_failed", "node_id", local.NodeID, "error", err)
+		return local, nil
+	}
+	return aggregateContentModerationRuntimeStatuses(nodes, local), nil
+}
+
+func (s *ContentModerationService) getLocalStatus(ctx context.Context) (*ContentModerationRuntimeStatus, error) {
 	if s == nil {
 		return &ContentModerationRuntimeStatus{}, nil
 	}
@@ -1520,6 +1555,7 @@ func (s *ContentModerationService) GetStatus(ctx context.Context) (*ContentModer
 	return &ContentModerationRuntimeStatus{
 		NodeID:                       contentModerationNodeID(),
 		MetricsScope:                 "local",
+		NodeCount:                    1,
 		Enabled:                      cfg.Enabled,
 		RiskControlEnabled:           riskEnabled,
 		Mode:                         cfg.Mode,
@@ -1550,6 +1586,209 @@ func (s *ContentModerationService) GetStatus(ctx context.Context) (*ContentModer
 		LastCleanupDeletedHit:        s.lastCleanupDeletedHit.Load(),
 		LastCleanupDeletedNonHit:     s.lastCleanupDeletedNonHit.Load(),
 	}, nil
+}
+
+func (s *ContentModerationService) clusterMetricsWorker() {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+		if local, err := s.getLocalStatus(ctx); err == nil {
+			if repo, ok := s.repo.(ContentModerationClusterMetricsRepository); ok {
+				if err := repo.UpsertContentModerationNodeStatus(ctx, local.NodeID, local); err != nil {
+					slog.Warn("content_moderation.cluster_metrics_report_failed", "node_id", local.NodeID, "error", err)
+				}
+			}
+		}
+		cancel()
+		<-ticker.C
+	}
+}
+
+func aggregateContentModerationRuntimeStatuses(nodes []ContentModerationNodeStatus, fallback *ContentModerationRuntimeStatus) *ContentModerationRuntimeStatus {
+	valid := make([]ContentModerationNodeStatus, 0, len(nodes))
+	for _, node := range nodes {
+		if node.Status != nil {
+			valid = append(valid, node)
+		}
+	}
+	if len(valid) == 0 {
+		return fallback
+	}
+	out := *valid[0].Status
+	out.NodeID = "cluster"
+	out.MetricsScope = "cluster"
+	out.NodeCount = len(valid)
+	out.WorkerCount = 0
+	out.ActiveWorkers = 0
+	out.IdleWorkers = 0
+	out.QueueSize = 0
+	out.QueueLength = 0
+	out.Enqueued = 0
+	out.Dropped = 0
+	out.Processed = 0
+	out.Errors = 0
+	out.PreBlockActive = 0
+	out.PreBlockChecked = 0
+	out.PreBlockAllowed = 0
+	out.PreBlockBlocked = 0
+	out.PreBlockErrors = 0
+	out.PreBlockAPIKeyActive = 0
+	out.PreBlockAPIKeyTotalCalls = 0
+	out.LastCleanupDeletedHit = 0
+	out.LastCleanupDeletedNonHit = 0
+	out.PreBlockAPIKeyLoads = nil
+	out.APIKeyStatuses = nil
+	var preBlockLatencyTotal int64
+	loadGroups := make(map[string][]ContentModerationAPIKeyLoad)
+	statusGroups := make(map[string][]ContentModerationAPIKeyStatus)
+	for _, node := range valid {
+		status := node.Status
+		out.WorkerCount += status.WorkerCount
+		out.ActiveWorkers += status.ActiveWorkers
+		out.IdleWorkers += status.IdleWorkers
+		out.QueueSize += status.QueueSize
+		out.QueueLength += status.QueueLength
+		out.Enqueued += status.Enqueued
+		out.Dropped += status.Dropped
+		out.Processed += status.Processed
+		out.Errors += status.Errors
+		out.PreBlockActive += status.PreBlockActive
+		out.PreBlockChecked += status.PreBlockChecked
+		out.PreBlockAllowed += status.PreBlockAllowed
+		out.PreBlockBlocked += status.PreBlockBlocked
+		out.PreBlockErrors += status.PreBlockErrors
+		out.PreBlockAPIKeyActive += status.PreBlockAPIKeyActive
+		out.PreBlockAPIKeyTotalCalls += status.PreBlockAPIKeyTotalCalls
+		out.LastCleanupDeletedHit += status.LastCleanupDeletedHit
+		out.LastCleanupDeletedNonHit += status.LastCleanupDeletedNonHit
+		preBlockLatencyTotal += status.PreBlockAvgLatencyMS * status.PreBlockChecked
+		if status.FlaggedHashCount > out.FlaggedHashCount {
+			out.FlaggedHashCount = status.FlaggedHashCount
+		}
+		if status.LastCleanupAt != nil && (out.LastCleanupAt == nil || status.LastCleanupAt.After(*out.LastCleanupAt)) {
+			t := *status.LastCleanupAt
+			out.LastCleanupAt = &t
+		}
+		for _, load := range status.PreBlockAPIKeyLoads {
+			key := load.EndpointID + ":" + load.KeyHash
+			loadGroups[key] = append(loadGroups[key], load)
+		}
+		for _, keyStatus := range status.APIKeyStatuses {
+			key := keyStatus.EndpointID + ":" + keyStatus.KeyHash
+			statusGroups[key] = append(statusGroups[key], keyStatus)
+		}
+	}
+	if out.QueueSize > 0 {
+		out.QueueUsagePercent = float64(out.QueueLength) * 100 / float64(out.QueueSize)
+	} else {
+		out.QueueUsagePercent = 0
+	}
+	if out.PreBlockChecked > 0 {
+		out.PreBlockAvgLatencyMS = preBlockLatencyTotal / out.PreBlockChecked
+	} else {
+		out.PreBlockAvgLatencyMS = 0
+	}
+	out.PreBlockAPIKeyLoads = aggregateContentModerationKeyLoads(loadGroups)
+	out.APIKeyStatuses = aggregateContentModerationKeyStatuses(statusGroups)
+	out.PreBlockAPIKeyAvailableCount = 0
+	for _, load := range out.PreBlockAPIKeyLoads {
+		if load.Status != "frozen" {
+			out.PreBlockAPIKeyAvailableCount++
+		}
+	}
+	return &out
+}
+
+func aggregateContentModerationKeyLoads(groups map[string][]ContentModerationAPIKeyLoad) []ContentModerationAPIKeyLoad {
+	out := make([]ContentModerationAPIKeyLoad, 0, len(groups))
+	for _, items := range groups {
+		item := items[0]
+		item.Active, item.Total, item.Success, item.Errors, item.AvgLatencyMS = 0, 0, 0, 0, 0
+		var latencyTotal int64
+		statuses := make([]string, 0, len(items))
+		for _, candidate := range items {
+			item.Active += candidate.Active
+			item.Total += candidate.Total
+			item.Success += candidate.Success
+			item.Errors += candidate.Errors
+			latencyTotal += candidate.AvgLatencyMS * candidate.Total
+			statuses = append(statuses, candidate.Status)
+			if candidate.LastLatencyMS > item.LastLatencyMS {
+				item.LastLatencyMS = candidate.LastLatencyMS
+				item.LastHTTPStatus = candidate.LastHTTPStatus
+			}
+		}
+		if item.Total > 0 {
+			item.AvgLatencyMS = latencyTotal / item.Total
+		}
+		item.Status = aggregateContentModerationHealthStatus(statuses)
+		out = append(out, item)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Index != out[j].Index {
+			return out[i].Index < out[j].Index
+		}
+		return out[i].EndpointID+out[i].KeyHash < out[j].EndpointID+out[j].KeyHash
+	})
+	for i := range out {
+		out[i].Index = i
+	}
+	return out
+}
+
+func aggregateContentModerationKeyStatuses(groups map[string][]ContentModerationAPIKeyStatus) []ContentModerationAPIKeyStatus {
+	out := make([]ContentModerationAPIKeyStatus, 0, len(groups))
+	for _, items := range groups {
+		item := items[0]
+		item.FailureCount, item.SuccessCount = 0, 0
+		statuses := make([]string, 0, len(items))
+		for _, candidate := range items {
+			item.FailureCount += candidate.FailureCount
+			item.SuccessCount += candidate.SuccessCount
+			statuses = append(statuses, candidate.Status)
+			if candidate.LastCheckedAt != nil && (item.LastCheckedAt == nil || candidate.LastCheckedAt.After(*item.LastCheckedAt)) {
+				item.LastCheckedAt = candidate.LastCheckedAt
+				item.LastError = candidate.LastError
+				item.LastLatencyMS = candidate.LastLatencyMS
+				item.LastHTTPStatus = candidate.LastHTTPStatus
+				item.FrozenUntil = candidate.FrozenUntil
+				item.LastTested = candidate.LastTested
+			}
+		}
+		item.Status = aggregateContentModerationHealthStatus(statuses)
+		out = append(out, item)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Index != out[j].Index {
+			return out[i].Index < out[j].Index
+		}
+		return out[i].EndpointID+out[i].KeyHash < out[j].EndpointID+out[j].KeyHash
+	})
+	for i := range out {
+		out[i].Index = i
+	}
+	return out
+}
+
+func aggregateContentModerationHealthStatus(statuses []string) string {
+	seen := make(map[string]bool, len(statuses))
+	for _, status := range statuses {
+		seen[status] = true
+	}
+	if seen["ok"] {
+		return "ok"
+	}
+	if seen["unknown"] {
+		return "unknown"
+	}
+	if seen["error"] {
+		return "error"
+	}
+	if seen["frozen"] {
+		return "frozen"
+	}
+	return "unknown"
 }
 
 func contentModerationNodeID() string {
@@ -2040,6 +2279,29 @@ func (s *ContentModerationService) persistContentModerationLog(ctx context.Conte
 			slog.Warn("content_moderation.record_hash_failed", "user_id", contentModerationEmailUserID(log), "endpoint", log.Endpoint, "error", err)
 		}
 	}
+	if applySideEffects && cfg != nil && cfg.ViolationWindowHours > 0 && log.Flagged && log.UserID != nil && *log.UserID > 0 {
+		if coordinator, ok := s.repo.(ContentModerationClusterCoordinator); ok {
+			since := time.Now().Add(-time.Duration(cfg.ViolationWindowHours) * time.Hour)
+			autoBanApplied, admin, err := coordinator.PersistContentModerationFlaggedLog(ctx, log, since, cfg.CyberPolicyExcludeFromBanCount, cfg.AutoBanEnabled, cfg.BanThreshold)
+			if err != nil {
+				slog.Warn("content_moderation.persist_flagged_transaction_failed", "user_id", *log.UserID, "endpoint", log.Endpoint, "error", err)
+				return
+			}
+			if admin && cfg.AutoBanEnabled && cfg.BanThreshold > 0 && log.ViolationCount >= cfg.BanThreshold {
+				slog.Warn("content_moderation.autoban_skipped_admin", "user_id", *log.UserID, "count", log.ViolationCount, "threshold", cfg.BanThreshold)
+			}
+			if autoBanApplied && s.authCacheInvalidator != nil {
+				s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, *log.UserID)
+			}
+			s.sendFlaggedNotificationSideEffects(ctx, cfg, log, autoBanApplied)
+			if log.EmailSent {
+				if err := s.repo.UpdateLogEmailSent(ctx, log.ID, true); err != nil {
+					slog.Warn("content_moderation.update_email_sent_failed", "log_id", log.ID, "error", err)
+				}
+			}
+			return
+		}
+	}
 	autoBanJustApplied := false
 	if applySideEffects {
 		autoBanJustApplied = s.applyFlaggedAccountSideEffects(ctx, cfg, log)
@@ -2056,26 +2318,6 @@ func (s *ContentModerationService) persistContentModerationLog(ctx context.Conte
 func (s *ContentModerationService) applyFlaggedAccountSideEffects(ctx context.Context, cfg *ContentModerationConfig, log *ContentModerationLog) bool {
 	if s == nil || cfg == nil || log == nil || !log.Flagged || log.UserID == nil || *log.UserID <= 0 {
 		return false
-	}
-	if coordinator, ok := s.repo.(ContentModerationClusterCoordinator); ok && cfg.ViolationWindowHours > 0 {
-		since := time.Now().Add(-time.Duration(cfg.ViolationWindowHours) * time.Hour)
-		count, applied, admin, err := coordinator.EvaluateContentModerationUserViolation(ctx, *log.UserID, since, cfg.CyberPolicyExcludeFromBanCount, cfg.AutoBanEnabled, cfg.BanThreshold)
-		if err != nil {
-			slog.Warn("content_moderation.user_violation_transaction_failed", "user_id", *log.UserID, "error", err)
-			return false
-		}
-		log.ViolationCount = count
-		if admin && cfg.AutoBanEnabled && cfg.BanThreshold > 0 && count >= cfg.BanThreshold {
-			slog.Warn("content_moderation.autoban_skipped_admin", "user_id", *log.UserID, "count", count, "threshold", cfg.BanThreshold)
-			return false
-		}
-		if cfg.AutoBanEnabled && cfg.BanThreshold > 0 && count >= cfg.BanThreshold {
-			log.AutoBanned = true
-		}
-		if applied && s.authCacheInvalidator != nil {
-			s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, *log.UserID)
-		}
-		return applied
 	}
 	count := 1
 	if s.repo != nil && cfg.ViolationWindowHours > 0 {

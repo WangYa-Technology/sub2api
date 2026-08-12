@@ -383,6 +383,7 @@ export default {
       emptyLogs: 'No audit records',
       preBlockSyncStatus: 'Pre-Block Sync Status',
       currentNode: 'Current node: {node}',
+      clusterNodes: 'Cluster nodes: {count}',
       preBlockSyncHint: 'Live counters for the synchronous moderation path, excluding async record tasks.',
       preBlockActive: 'Sync Processing',
       preBlockActiveHint: 'Currently checking',

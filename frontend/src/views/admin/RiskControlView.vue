@@ -65,7 +65,7 @@
                 <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.preBlockSyncHint') }}</p>
               </div>
               <div class="flex flex-wrap items-center gap-2">
-                <span v-if="status?.node_id" class="inline-flex w-fit items-center rounded-full bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-700 dark:bg-sky-900/20 dark:text-sky-300">{{ t('admin.riskControl.currentNode', { node: status.node_id }) }}</span>
+                <span v-if="status?.node_id" class="inline-flex w-fit items-center rounded-full bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-700 dark:bg-sky-900/20 dark:text-sky-300">{{ status.metrics_scope === 'cluster' ? t('admin.riskControl.clusterNodes', { count: status.node_count }) : t('admin.riskControl.currentNode', { node: status.node_id }) }}</span>
                 <span class="inline-flex w-fit items-center rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-600 dark:bg-dark-700 dark:text-gray-300">{{ modeLabel(status?.mode ?? configForm.mode) }}</span>
               </div>
             </div>
@@ -2130,9 +2130,9 @@ function applyConfig(config: ContentModerationConfig) {
   configForm.model = defaultEndpoint?.model || config.model || 'omni-moderation-latest'
   configForm.proxy_id = defaultEndpoint?.proxy_id || config.proxy_id || null
   configForm.api_keys_text = ''
-  configForm.api_key_configured = defaultEndpoint ? defaultEndpoint.api_key_count > 0 : config.api_key_configured
+  configForm.api_key_configured = (config.api_key_count ?? 0) > 0
   configForm.api_key_masked = config.api_key_masked || ''
-  configForm.api_key_count = defaultEndpoint?.api_key_count ?? config.api_key_count ?? 0
+  configForm.api_key_count = config.api_key_count ?? 0
   configForm.api_key_masks = Array.isArray(defaultEndpoint?.api_key_masks) ? [...defaultEndpoint.api_key_masks] : (Array.isArray(config.api_key_masks) ? [...config.api_key_masks] : [])
   configForm.api_key_statuses = Array.isArray(defaultEndpoint?.api_key_statuses) ? [...defaultEndpoint.api_key_statuses] : (Array.isArray(config.api_key_statuses) ? [...config.api_key_statuses] : [])
   additionalEndpointForms.value = configuredEndpoints

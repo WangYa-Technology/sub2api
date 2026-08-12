@@ -49,22 +49,75 @@ func (r *contentModerationRepository) ReleaseContentModerationCleanupClaim(ctx c
 	return nil
 }
 
-func (r *contentModerationRepository) EvaluateContentModerationUserViolation(ctx context.Context, userID int64, since time.Time, excludeCyberPolicy bool, autoBanEnabled bool, banThreshold int) (count int, autoBanApplied bool, admin bool, err error) {
+func (r *contentModerationRepository) UpsertContentModerationNodeStatus(ctx context.Context, nodeID string, status *service.ContentModerationRuntimeStatus) error {
+	if r == nil || r.db == nil || strings.TrimSpace(nodeID) == "" || status == nil {
+		return fmt.Errorf("invalid content moderation node status")
+	}
+	raw, err := json.Marshal(status)
+	if err != nil {
+		return fmt.Errorf("marshal content moderation node status: %w", err)
+	}
+	_, err = r.db.ExecContext(ctx, `
+INSERT INTO content_moderation_node_metrics (node_id, snapshot, last_seen_at)
+VALUES ($1, $2::jsonb, NOW())
+ON CONFLICT (node_id) DO UPDATE SET snapshot = EXCLUDED.snapshot, last_seen_at = NOW()
+`, nodeID, string(raw))
+	if err != nil {
+		return fmt.Errorf("upsert content moderation node status: %w", err)
+	}
+	return nil
+}
+
+func (r *contentModerationRepository) ListContentModerationNodeStatuses(ctx context.Context, seenSince time.Time) ([]service.ContentModerationNodeStatus, error) {
 	if r == nil || r.db == nil {
-		return 0, false, false, fmt.Errorf("content moderation database unavailable")
+		return nil, fmt.Errorf("content moderation database unavailable")
+	}
+	rows, err := r.db.QueryContext(ctx, `
+SELECT snapshot, last_seen_at
+FROM content_moderation_node_metrics
+WHERE last_seen_at >= $1
+ORDER BY node_id ASC
+`, seenSince)
+	if err != nil {
+		return nil, fmt.Errorf("list content moderation node statuses: %w", err)
+	}
+	defer rows.Close()
+	out := make([]service.ContentModerationNodeStatus, 0)
+	for rows.Next() {
+		var raw []byte
+		var item service.ContentModerationNodeStatus
+		if err := rows.Scan(&raw, &item.LastSeenAt); err != nil {
+			return nil, fmt.Errorf("scan content moderation node status: %w", err)
+		}
+		item.Status = &service.ContentModerationRuntimeStatus{}
+		if err := json.Unmarshal(raw, item.Status); err != nil {
+			return nil, fmt.Errorf("decode content moderation node status: %w", err)
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (r *contentModerationRepository) PersistContentModerationFlaggedLog(ctx context.Context, log *service.ContentModerationLog, since time.Time, excludeCyberPolicy bool, autoBanEnabled bool, banThreshold int) (autoBanApplied bool, admin bool, err error) {
+	if r == nil || r.db == nil || log == nil || log.UserID == nil || *log.UserID <= 0 {
+		return false, false, fmt.Errorf("content moderation flagged transaction input invalid")
 	}
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, false, false, fmt.Errorf("begin content moderation user violation transaction: %w", err)
+		return false, false, fmt.Errorf("begin content moderation user violation transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	var role, status string
-	if err := tx.QueryRowContext(ctx, "SELECT role, status FROM users WHERE id = $1 FOR UPDATE", userID).Scan(&role, &status); err != nil {
-		return 0, false, false, fmt.Errorf("lock content moderation user: %w", err)
+	if err := tx.QueryRowContext(ctx, "SELECT role, status FROM users WHERE id = $1 FOR UPDATE", *log.UserID).Scan(&role, &status); err != nil {
+		return false, false, fmt.Errorf("lock content moderation user: %w", err)
 	}
 	admin = role == service.RoleAdmin
+	if err := createContentModerationLog(ctx, tx, log); err != nil {
+		return false, admin, err
+	}
+	var count int
 	if err := tx.QueryRowContext(ctx, `
-SELECT COUNT(*) + 1
+SELECT COUNT(*)
 FROM content_moderation_logs
 WHERE user_id = $1
   AND flagged = TRUE
@@ -72,22 +125,35 @@ WHERE user_id = $1
   AND ($3::bool IS FALSE OR action <> 'cyber_policy')
   AND created_at >= $2
   AND created_at > COALESCE((SELECT MAX(created_at) FROM content_moderation_logs WHERE user_id = $1 AND auto_banned = TRUE), '-infinity'::timestamptz)
-`, userID, since, excludeCyberPolicy).Scan(&count); err != nil {
-		return 0, false, admin, fmt.Errorf("count content moderation user violations: %w", err)
+`, *log.UserID, since, excludeCyberPolicy).Scan(&count); err != nil {
+		return false, admin, fmt.Errorf("count content moderation user violations: %w", err)
 	}
+	log.ViolationCount = count
 	if autoBanEnabled && banThreshold > 0 && count >= banThreshold && !admin && status != service.StatusDisabled {
-		if _, err := tx.ExecContext(ctx, "UPDATE users SET status = $1, updated_at = NOW() WHERE id = $2", service.StatusDisabled, userID); err != nil {
-			return 0, false, admin, fmt.Errorf("disable content moderation user: %w", err)
+		if _, err := tx.ExecContext(ctx, "UPDATE users SET status = $1, updated_at = NOW() WHERE id = $2", service.StatusDisabled, *log.UserID); err != nil {
+			return false, admin, fmt.Errorf("disable content moderation user: %w", err)
 		}
 		autoBanApplied = true
 	}
-	if err := tx.Commit(); err != nil {
-		return 0, false, admin, fmt.Errorf("commit content moderation user violation transaction: %w", err)
+	log.AutoBanned = autoBanEnabled && banThreshold > 0 && count >= banThreshold && !admin
+	if _, err := tx.ExecContext(ctx, "UPDATE content_moderation_logs SET violation_count = $1, auto_banned = $2 WHERE id = $3", log.ViolationCount, log.AutoBanned, log.ID); err != nil {
+		return false, admin, fmt.Errorf("update content moderation violation result: %w", err)
 	}
-	return count, autoBanApplied, admin, nil
+	if err := tx.Commit(); err != nil {
+		return false, admin, fmt.Errorf("commit content moderation user violation transaction: %w", err)
+	}
+	return autoBanApplied, admin, nil
 }
 
 func (r *contentModerationRepository) CreateLog(ctx context.Context, log *service.ContentModerationLog) error {
+	return createContentModerationLog(ctx, r.db, log)
+}
+
+type contentModerationLogQueryRower interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+func createContentModerationLog(ctx context.Context, db contentModerationLogQueryRower, log *service.ContentModerationLog) error {
 	if log == nil {
 		return nil
 	}
@@ -115,7 +181,7 @@ func (r *contentModerationRepository) CreateLog(ctx context.Context, log *servic
 	if log.UpstreamLatencyMS != nil {
 		latency = *log.UpstreamLatencyMS
 	}
-	err = r.db.QueryRowContext(ctx, `
+	err = db.QueryRowContext(ctx, `
 INSERT INTO content_moderation_logs (
     request_id, user_id, user_email, api_key_id, api_key_name, group_id, group_name,
     endpoint, provider, model, mode, action, flagged, highest_category, highest_score,

@@ -1,18 +1,51 @@
 <template>
-  <div ref="homeRoot" class="min-h-screen bg-white" v-html="homeHtml"></div>
+  <div ref="homeRoot" class="min-h-screen bg-white dark:bg-[#080c0c]" v-html="homeHtml"></div>
+
+  <Teleport v-if="themeToggleReady" to="[data-home-theme-slot]">
+    <button
+      type="button"
+      class="hc-theme-toggle"
+      :aria-label="themeToggleLabel"
+      :aria-pressed="isDark"
+      :title="themeToggleLabel"
+      data-home-theme-toggle
+      @click="toggleTheme"
+    >
+      <Icon :name="isDark ? 'sun' : 'moon'" size="sm" :stroke-width="1.8" aria-hidden="true" />
+    </button>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import Icon from '@/components/icons/Icon.vue'
 import { useAppStore } from '@/stores'
+import {
+  isDarkTheme,
+  setTheme,
+  THEME_CHANGE_EVENT,
+  type ThemeChangeDetail
+} from '@/utils/theme'
 import { sanitizeUrl } from '@/utils/url'
 
 const homeRoot = ref<HTMLElement | null>(null)
 const homeHtml = ref('')
+const isDark = ref(isDarkTheme())
+const themeToggleReady = ref(false)
 const appStore = useAppStore()
+const themeToggleLabel = computed(() => isDark.value ? '切换至亮色模式' : '切换至暗色模式')
 
 let stylesheetElement: HTMLLinkElement | null = null
 let scriptElement: HTMLScriptElement | null = null
+
+function toggleTheme() {
+  setTheme(isDark.value ? 'light' : 'dark')
+}
+
+function handleThemeChange(event: Event) {
+  const detail = (event as CustomEvent<ThemeChangeDetail>).detail
+  isDark.value = detail.theme === 'dark'
+}
 
 function ensureStylesheet() {
   if (document.querySelector('link[data-hcai-home-style]')) {
@@ -21,7 +54,7 @@ function ensureStylesheet() {
 
   stylesheetElement = document.createElement('link')
   stylesheetElement.rel = 'stylesheet'
-  stylesheetElement.href = '/hcai/style.css?v=gpt56-planets'
+  stylesheetElement.href = '/hcai/style.css?v=home-theme-v1'
   stylesheetElement.dataset.hcaiHomeStyle = 'true'
   document.head.appendChild(stylesheetElement)
 }
@@ -82,6 +115,8 @@ function runPageScript() {
 }
 
 onMounted(() => {
+  document.addEventListener(THEME_CHANGE_EVENT, handleThemeChange)
+
   void (async () => {
     ensureStylesheet()
 
@@ -104,11 +139,14 @@ onMounted(() => {
     homeHtml.value = page.outerHTML
 
     await nextTick()
+    themeToggleReady.value = true
     runPageScript()
   })()
 })
 
 onBeforeUnmount(() => {
+  document.removeEventListener(THEME_CHANGE_EVENT, handleThemeChange)
+  themeToggleReady.value = false
   scriptElement?.remove()
   scriptElement = null
 })

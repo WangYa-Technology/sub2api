@@ -32,12 +32,16 @@ func ProvideCNProviderBalanceCheckService(
 	balanceService *CNProviderBalanceService,
 	quotaService *CNProviderQuotaService,
 	cfg *config.Config,
+	lockCache LeaderLockCache,
+	db *sql.DB,
 ) *CNProviderBalanceCheckService {
 	minutes := 10
 	if cfg != nil && cfg.Gateway.CNProviders.BalanceCheckIntervalMinutes > 0 {
 		minutes = cfg.Gateway.CNProviders.BalanceCheckIntervalMinutes
 	}
 	svc := NewCNProviderBalanceCheckService(accountRepo, balanceService, quotaService, cfg, time.Duration(minutes)*time.Minute)
+	applyGlobalBackgroundTaskEligibility(&svc.instanceID, cfg)
+	svc.SetLeaderLock(lockCache, db)
 	svc.Start()
 	return svc
 }

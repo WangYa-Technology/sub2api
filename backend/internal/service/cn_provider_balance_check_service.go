@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/google/uuid"
 )
 
 // cnQuotaProber 抽象额度探测（*CNProviderQuotaService 实现，测试可替换）。
@@ -18,6 +20,11 @@ type cnQuotaProber interface {
 
 // cnQuotaProbeConcurrency 周期任务并发探测额度账号的并发度。
 const cnQuotaProbeConcurrency = 4
+
+const (
+	cnProviderBalanceCheckLeaderLockKey = "cn_provider:balance_check:leader"
+	cnProviderBalanceCheckLeaderLockTTL = 5 * time.Minute
+)
 
 // CNProviderBalanceCheckService 周期性探测国产供应商账号：
 //   - payg（按量付费）：余额低于阈值则临时停调，恢复则清除（仅清除本服务写入的停调）；
@@ -36,6 +43,9 @@ type CNProviderBalanceCheckService struct {
 	stopCh         chan struct{}
 	stopOnce       sync.Once
 	wg             sync.WaitGroup
+	lockCache      LeaderLockCache
+	db             *sql.DB
+	instanceID     string
 }
 
 // NewCNProviderBalanceCheckService 构造周期余额/额度检测服务。
@@ -54,7 +64,17 @@ func NewCNProviderBalanceCheckService(
 		cfg:            cfg,
 		interval:       interval,
 		stopCh:         make(chan struct{}),
+		instanceID:     uuid.NewString(),
 	}
+}
+
+// SetLeaderLock injects the shared coordination backends used by all regions.
+func (s *CNProviderBalanceCheckService) SetLeaderLock(lockCache LeaderLockCache, db *sql.DB) {
+	if s == nil {
+		return
+	}
+	s.lockCache = lockCache
+	s.db = db
 }
 
 func (s *CNProviderBalanceCheckService) Start() {
@@ -97,6 +117,23 @@ func (s *CNProviderBalanceCheckService) Stop() {
 }
 
 func (s *CNProviderBalanceCheckService) runOnce() {
+	lockCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	release, acquired, err := tryAcquireSingletonLeaderLockWithError(
+		lockCtx,
+		s.lockCache,
+		s.db,
+		cnProviderBalanceCheckLeaderLockKey,
+		s.instanceID,
+		cnProviderBalanceCheckLeaderLockTTL,
+	)
+	if err != nil || !acquired {
+		return
+	}
+	if release != nil {
+		defer release()
+	}
+
 	// 收集 coding 探测目标（kimi/deepseek + 智谱）与 payg 检查队列。
 	// coding 探测统一在收集完成后按 4 并发执行：单账号探测 15-20s，串行 ×
 	// 多账号会耗尽整体预算（120s 上限），排在后面的账号快照会饥饿，

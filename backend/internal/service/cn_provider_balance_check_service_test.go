@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
@@ -68,6 +69,27 @@ func TestCNProviderBalanceCheckRunOnceWithoutQuotaService(t *testing.T) {
 	}}
 	svc := &CNProviderBalanceCheckService{accountRepo: repo, cfg: &config.Config{}}
 	require.NotPanics(t, func() { svc.runOnce() })
+}
+
+func TestCNProviderBalanceCheckRunOnceSkipsWhenAnotherNodeHoldsLock(t *testing.T) {
+	repo := &fakeCNCheckRepo{byPlatform: map[string][]Account{
+		PlatformKimi: {{ID: 1, Platform: PlatformKimi, Type: AccountTypeAPIKey, Status: StatusActive,
+			Credentials: map[string]any{"account_mode": "coding"}}},
+	}}
+	prober := &fakeCNQuotaProber{}
+	cache := &fakeLeaderLockCache{}
+	_, _ = cache.TryAcquireLeaderLock(context.Background(), cnProviderBalanceCheckLeaderLockKey, "peer", time.Minute)
+	svc := &CNProviderBalanceCheckService{
+		accountRepo:  repo,
+		quotaService: prober,
+		cfg:          &config.Config{},
+		lockCache:    cache,
+		instanceID:   "local",
+	}
+
+	svc.runOnce()
+	require.Empty(t, prober.probed)
+	require.Equal(t, "peer", cache.heldBy(cnProviderBalanceCheckLeaderLockKey))
 }
 
 // 双币种（deepseek CNY+USD）停调判定：任一币种达标即不停调，全部低于阈值才停；

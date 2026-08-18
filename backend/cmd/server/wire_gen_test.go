@@ -69,6 +69,7 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		nil, // concurrencyService
 		tokenRefreshSvc,
 		accountExpirySvc,
+		nil, // cnProviderBalanceCheck
 		codexVersionSyncSvc,
 		proxyExpirySvc,
 		subscriptionExpirySvc,

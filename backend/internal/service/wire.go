@@ -26,6 +26,22 @@ func ProvideGrokOAuthService(proxyRepo ProxyRepository, oauthClient GrokOAuthCli
 	return svc
 }
 
+// ProvideCNProviderBalanceCheckService constructs and starts the periodic CN provider quota check.
+func ProvideCNProviderBalanceCheckService(
+	accountRepo AccountRepository,
+	balanceService *CNProviderBalanceService,
+	quotaService *CNProviderQuotaService,
+	cfg *config.Config,
+) *CNProviderBalanceCheckService {
+	minutes := 10
+	if cfg != nil && cfg.Gateway.CNProviders.BalanceCheckIntervalMinutes > 0 {
+		minutes = cfg.Gateway.CNProviders.BalanceCheckIntervalMinutes
+	}
+	svc := NewCNProviderBalanceCheckService(accountRepo, balanceService, quotaService, cfg, time.Duration(minutes)*time.Minute)
+	svc.Start()
+	return svc
+}
+
 // BuildInfo contains build information
 type BuildInfo struct {
 	Version   string
@@ -818,6 +834,9 @@ var ProviderSet = wire.NewSet(
 	ProvideRateLimitService,
 	ProvideAccountUsageService,
 	ProvideAccountTestService,
+	NewCNProviderQuotaService,
+	NewCNProviderBalanceService,
+	ProvideCNProviderBalanceCheckService,
 	ProvideUpstreamBillingProbeService,
 	ProvideOllamaCloudUsageService,
 	ProvideSettingService,
@@ -944,6 +963,7 @@ func ProvideChannelMonitorService(
 func ProvideChannelMonitorRunner(
 	svc *ChannelMonitorService,
 	settingService *SettingService,
+	quotaFetcher *ChannelMonitorQuotaFetcher,
 	lockCache LeaderLockCache,
 	db *sql.DB,
 	cfg *config.Config,
@@ -959,6 +979,7 @@ func ProvideChannelMonitorRunner(
 		// was constructed without settings (tests / alternate providers).
 		svc.SetRuntimeReader(settingService)
 		svc.SetScheduler(r)
+		svc.SetQuotaFetcher(quotaFetcher)
 	}
 	r.Start()
 	return r

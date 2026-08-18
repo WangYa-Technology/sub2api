@@ -157,6 +157,8 @@ interface Props {
   ariaLabel?: string
   ariaDescribedby?: string
   filterOption?: (option: SelectOption | Record<string, unknown>) => boolean
+  remote?: boolean
+  loading?: boolean
 }
 
 interface Emits {
@@ -171,6 +173,8 @@ const props = withDefaults(defineProps<Props>(), {
   creatable: false,
   creatablePrefix: '',
   clearable: false,
+  remote: false,
+  loading: false,
   valueKey: 'value',
   labelKey: 'label'
 })
@@ -193,7 +197,9 @@ const dropdownMinimumWidth = 200
 // i18n placeholders
 const placeholderText = computed(() => props.placeholder ?? t('common.selectOption'))
 const searchPlaceholderText = computed(() => props.searchPlaceholder ?? t('common.searchPlaceholder'))
-const emptyTextDisplay = computed(() => props.emptyText ?? t('common.noOptionsFound'))
+const emptyTextDisplay = computed(() =>
+  props.loading ? t('common.loading') : (props.emptyText ?? t('common.noOptionsFound'))
+)
 
 const isSearchable = computed(() => {
   if (props.searchable === 'auto') return props.options.length > 5
@@ -283,7 +289,7 @@ const filteredOptions = computed(() => {
   if (filterOption) {
     opts = opts.filter(filterOption)
   }
-  if (isSearchable.value && searchQuery.value) {
+  if (isSearchable.value && searchQuery.value && !props.remote) {
     const query = searchQuery.value.toLowerCase()
     opts = opts.filter((opt) => {
       // Match label

@@ -61,6 +61,7 @@
             v-model="accountSelectValue"
             :options="accountOptions"
             :placeholder="t('admin.channelMonitor.form.linkedAccountPlaceholder')"
+            searchable
             remote
             :loading="accountsLoading"
             @search="onAccountSearch"
@@ -543,6 +544,7 @@ const accountHydrationFailed = ref(false)
 const pinnedAccount = ref<LinkedAccount | null>(null)
 let accountSearchSeq = 0
 let accountSearchAbort: AbortController | null = null
+let accountSearchTimer: ReturnType<typeof setTimeout> | null = null
 const hydrationAttempted = new Set<number>()
 
 const accountOptions = computed(() => {
@@ -634,7 +636,11 @@ async function ensureSelectedAccountHydrated() {
 }
 
 function onAccountSearch(query: string) {
-  void loadLinkedAccounts(query)
+  if (accountSearchTimer) clearTimeout(accountSearchTimer)
+  accountSearchTimer = setTimeout(() => {
+    accountSearchTimer = null
+    void loadLinkedAccounts(query)
+  }, 250)
 }
 
 watch(
@@ -642,6 +648,10 @@ watch(
   ([show, provider], prev) => {
     const [prevShow, prevProvider] = prev ?? []
     if (!show) {
+      if (accountSearchTimer) {
+        clearTimeout(accountSearchTimer)
+        accountSearchTimer = null
+      }
       accountSearchAbort?.abort()
       return
     }

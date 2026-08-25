@@ -27,6 +27,7 @@ import {
   type ThemeChangeDetail
 } from '@/utils/theme'
 import { sanitizeUrl } from '@/utils/url'
+import { FeatureFlags, isFeatureFlagEnabled } from '@/utils/featureFlags'
 
 const homeRoot = ref<HTMLElement | null>(null)
 const homeHtml = ref('')

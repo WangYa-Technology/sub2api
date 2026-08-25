@@ -60,16 +60,6 @@ func shouldStripOpenAIResponsesNonPairCallID(itemType string) bool {
 	default:
 		return false
 	}
-	if itemType == "reasoning" {
-		return !strings.HasPrefix(id, "rs")
-	}
-	if isCodexToolCallInputType(itemType) {
-		return !strings.HasPrefix(id, "fc")
-	}
-	if itemType == "reasoning" {
-		return !strings.HasPrefix(id, "rs")
-	}
-	return false
 }
 
 func sanitizeOpenAIResponsesInputItemIDs(body []byte) ([]byte, bool, error) {

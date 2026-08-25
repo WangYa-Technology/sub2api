@@ -1,0 +1,6 @@
+# Required reviewers for application and release changes.
+* @WangYa-Technology
+.github/ @WangYa-Technology
+backend/ @WangYa-Technology
+frontend/ @WangYa-Technology
+deploy/ @WangYa-Technology

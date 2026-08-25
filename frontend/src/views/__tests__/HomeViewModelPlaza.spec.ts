@@ -9,10 +9,8 @@ describe('HomeView model plaza entry', () => {
       'utf8'
     )
 
-    expect(source).toContain('settings?.model_plaza_enabled')
-    expect(source).toContain('settings.model_plaza_require_auth')
-    expect(source).toContain("entry.href = '/model-plaza'")
-    expect(source).toContain("entry.textContent = '模型广场'")
-    expect(source).toContain('navCta.before(entry)')
+    expect(source).toContain('showModelPlazaEntry')
+    expect(source).toContain('model_plaza_require_auth')
+    expect(source).toContain('to="/model-plaza"')
   })
 })

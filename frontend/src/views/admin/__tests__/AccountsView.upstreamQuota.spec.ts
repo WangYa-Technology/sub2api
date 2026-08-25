@@ -816,20 +816,29 @@ describe('admin AccountsView upstream quota state', () => {
 
   it('keeps a successful result in memory when local storage is unavailable', async () => {
     queryUpstreamQuota.mockResolvedValueOnce(quotaResult)
-    const nativeSetItem = window.localStorage.setItem.bind(window.localStorage)
-    vi.spyOn(window.localStorage, 'setItem').mockImplementation((key, value) => {
-      if (key === quotaCacheKey(99, 7)) throw new DOMException('storage disabled', 'SecurityError')
-      return nativeSetItem(key, value)
-    })
+    const nativeStorage = window.localStorage
+    const unavailableStorage = {
+      getItem: nativeStorage.getItem.bind(nativeStorage),
+      removeItem: nativeStorage.removeItem.bind(nativeStorage),
+      clear: nativeStorage.clear.bind(nativeStorage),
+      key: nativeStorage.key.bind(nativeStorage),
+      get length() { return nativeStorage.length },
+      setItem: () => { throw new DOMException('storage disabled', 'SecurityError') },
+    } satisfies Storage
+    Object.defineProperty(window, 'localStorage', { configurable: true, value: unavailableStorage })
 
-    const wrapper = mountView()
-    await flushPromises()
-    await wrapper.get('[data-test="quota-cell"][data-account-id="7"] [data-test="query-quota"]').trigger('click')
-    await flushPromises()
+    try {
+      const wrapper = mountView()
+      await flushPromises()
+      await wrapper.get('[data-test="quota-cell"][data-account-id="7"] [data-test="query-quota"]').trigger('click')
+      await flushPromises()
 
-    expect(wrapper.get('[data-test="quota-cell"][data-account-id="7"] [data-test="quota-result"]').text()).toBe('80')
-    expect(localStorage.getItem(quotaCacheKey(99, 7))).toBeNull()
-    wrapper.unmount()
+      expect(wrapper.get('[data-test="quota-cell"][data-account-id="7"] [data-test="quota-result"]').text()).toBe('80')
+      expect(window.localStorage.getItem(quotaCacheKey(99, 7))).toBeNull()
+      wrapper.unmount()
+    } finally {
+      Object.defineProperty(window, 'localStorage', { configurable: true, value: nativeStorage })
+    }
   })
 
   it('shows keyed rate and quota outcomes for one second without stale timers winning', async () => {

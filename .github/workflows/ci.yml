@@ -30,7 +30,7 @@ jobs:
       - name: Full Go tests
         run: go test ./...
       - name: Build
-        run: CGO_ENABLED=0 go build -tags embed ./cmd/server
+        run: CGO_ENABLED=0 go build ./cmd/server
 
   frontend:
     name: Frontend checks

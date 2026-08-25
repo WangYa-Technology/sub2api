@@ -164,6 +164,7 @@ interface Props {
 interface Emits {
   (e: 'update:modelValue', value: string | number | boolean | null): void
   (e: 'change', value: string | number | boolean | null, option: SelectOption | null): void
+  (e: 'search', value: string): void
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -393,6 +394,11 @@ watch(isOpen, (open) => {
     window.removeEventListener('scroll', updateTriggerRect, { capture: true })
     window.removeEventListener('resize', calculateDropdownPosition)
   }
+})
+
+// Remote selects use this event to fetch options from the server as the user types.
+watch(searchQuery, (query) => {
+  if (props.remote && query) emit('search', query)
 })
 
 const selectOption = (option: any) => {

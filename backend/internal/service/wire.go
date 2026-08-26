@@ -938,6 +938,7 @@ var ProviderSet = wire.NewSet(
 	ProvidePaymentOrderExpiryService,
 	ProvideBalanceNotifyService,
 	ProvideChannelMonitorService,
+	NewChannelMonitorQuotaFetcher,
 	ProvideChannelMonitorRunner,
 	ProvideChannelMonitorV2Service,
 	ProvideChannelMonitorV2Aggregator,

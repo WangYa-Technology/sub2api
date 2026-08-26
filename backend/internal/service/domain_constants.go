@@ -518,7 +518,8 @@ const (
 
 	// SettingKeyModelPlazaDescription stores the Markdown blurb rendered at the top of
 	// the Model Plaza page (global pricing notes, exchange rate, promotions, ...).
-	SettingKeyModelPlazaDescription = "model_plaza_description"
+	SettingKeyModelPlazaDescription   = "model_plaza_description"
+	SettingKeyPluginManagementEnabled = "plugin_management_enabled"
 
 	// SettingKeyModelPlazaCNYPerUSD stores the recharge conversion rate used by
 	// the Model Plaza: how many CNY are charged for 1 USD of channel price.
@@ -540,6 +541,8 @@ const (
 
 	// SettingKeyRateLimit429CooldownSettings stores JSON config for 429 fallback cooldown handling.
 	SettingKeyRateLimit429CooldownSettings = "rate_limit_429_cooldown_settings"
+	// SettingKeyOpenAIAPIKeyHealthBreakerSettings stores the opt-in OpenAI pool API-key breaker config.
+	SettingKeyOpenAIAPIKeyHealthBreakerSettings = "openai_apikey_health_breaker_settings"
 
 	// =========================
 	// Stream Timeout Handling

@@ -42,7 +42,7 @@ func TestOpenAIGatewayService_APIKeyPassthrough_StripsInvalidInputItemIDs(t *tes
 			{"type":"function_call","id":"fc_valid","call_id":"call_456","name":"apply_patch","arguments":"{}"},
 			{"type":"reasoning","id":"rs_valid","summary":[]},
 			{"type":"function_call_output","id":"item_output","call_id":"call_123","output":"done"},
-			{"type":"web_search_call","id":"item_unconstrained"}
+			{"type":"web_search_call","id":"item_wrong_web"}
 		]
 	}`)
 
@@ -66,7 +66,9 @@ func TestOpenAIGatewayService_APIKeyPassthrough_StripsInvalidInputItemIDs(t *tes
 	require.Equal(t, "rs_valid", gjson.GetBytes(forwarded, "input.5.id").String())
 	require.Equal(t, "item_output", gjson.GetBytes(forwarded, "input.6.id").String())
 	require.Equal(t, "call_123", gjson.GetBytes(forwarded, "input.6.call_id").String())
-	require.Equal(t, "item_unconstrained", gjson.GetBytes(forwarded, "input.7.id").String())
+	// web_search_call IDs are validated by the upstream Responses API and must
+	// use the ws_ namespace; invalid replayed IDs are stripped.
+	require.False(t, gjson.GetBytes(forwarded, "input.7.id").Exists())
 }
 
 // TestOpenAIGatewayService_APIKeyPassthrough_StripsInvalidReasoningItemIDs
@@ -121,12 +123,20 @@ func TestShouldStripOpenAIResponsesInputItemID_Reasoning(t *testing.T) {
 	}{
 		{"reasoning item_* id", "reasoning", "item_bad_reasoning", true},
 		{"reasoning rs id", "reasoning", "rs_abc123", false},
-		{"reasoning empty id", "reasoning", "", false},
+		{"reasoning empty id", "reasoning", "", true},
 		{"message msg id", "message", "msg_abc", false},
 		{"message item id", "message", "item_x", true},
 		{"function_call fc id", "function_call", "fc_abc", false},
+		{"function_call ctc id", "function_call", "ctc_abc", true},
 		{"function_call item id", "function_call", "item_x", true},
-		{"unconstrained type", "web_search_call", "ws_001", false},
+		{"custom tool ctc id", "custom_tool_call", "ctc_abc", false},
+		{"custom tool fc id", "custom_tool_call", "fc_abc", true},
+		{"tool search tsc id", "tool_search_call", "tsc_abc", false},
+		{"tool search fc id", "tool_search_call", "fc_abc", true},
+		{"web search ws id", "web_search_call", "ws_001", false},
+		{"web search item id", "web_search_call", "item_001", true},
+		{"custom output fc id", "custom_tool_call_output", "fc_001", false},
+		{"custom output ctco id", "custom_tool_call_output", "ctco_001", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -159,4 +169,39 @@ func TestSanitizeOpenAIResponsesInputItemIDs_AllocationGrowthIsLinear(t *testing
 	largeAllocated := allocatedBytes(makeBody(200))
 	require.Less(t, largeAllocated, smallAllocated*30,
 		"10x more input items must not cause quadratic whole-body allocation growth")
+}
+
+func TestNormalizeOpenAIResponsesWebSocketCompatibilityBodyPreservesOpaqueReferences(t *testing.T) {
+	body := []byte(`{"type":"response.create","input":[
+		{"type":"custom_tool_call","id":"ctc_call","call_id":"call_custom","name":"apply_patch","input":"patch"},
+		{"type":"custom_tool_call_output","id":"ctco_bad","call_id":"call_custom","output":"done"},
+		{"type":"item_reference","id":"ctco_bad"},
+		{"type":"future_item","id":"item_future","payload":"keep"}
+	]}`)
+
+	for _, accountType := range []string{AccountTypeAPIKey, AccountTypeOAuth} {
+		t.Run(accountType, func(t *testing.T) {
+			normalized, changed, err := normalizeOpenAIResponsesWebSocketCompatibilityBody(body, &Account{
+				Platform: PlatformOpenAI,
+				Type:     accountType,
+			}, false)
+
+			require.NoError(t, err)
+			require.True(t, changed)
+			require.Len(t, gjson.GetBytes(normalized, "input").Array(), 4)
+			require.Equal(t, "ctc_call", gjson.GetBytes(normalized, "input.0.id").String())
+			require.Equal(t, "call_custom", gjson.GetBytes(normalized, "input.1.call_id").String())
+			require.False(t, gjson.GetBytes(normalized, "input.1.id").Exists())
+			require.Equal(t, "ctco_bad", gjson.GetBytes(normalized, "input.2.id").String())
+			require.Equal(t, "item_future", gjson.GetBytes(normalized, "input.3.id").String())
+
+			second, changedAgain, err := normalizeOpenAIResponsesWebSocketCompatibilityBody(normalized, &Account{
+				Platform: PlatformOpenAI,
+				Type:     accountType,
+			}, false)
+			require.NoError(t, err)
+			require.False(t, changedAgain)
+			require.JSONEq(t, string(normalized), string(second))
+		})
+	}
 }

@@ -66,7 +66,9 @@ func TestOpenAIGatewayService_APIKeyPassthrough_StripsInvalidInputItemIDs(t *tes
 	require.Equal(t, "rs_valid", gjson.GetBytes(forwarded, "input.5.id").String())
 	require.Equal(t, "item_output", gjson.GetBytes(forwarded, "input.6.id").String())
 	require.Equal(t, "call_123", gjson.GetBytes(forwarded, "input.6.call_id").String())
-	require.Equal(t, "item_unconstrained", gjson.GetBytes(forwarded, "input.7.id").String())
+	// web_search_call IDs are validated by the upstream Responses API and must
+	// use the ws_ namespace; invalid replayed IDs are stripped.
+	require.False(t, gjson.GetBytes(forwarded, "input.7.id").Exists())
 }
 
 // TestOpenAIGatewayService_APIKeyPassthrough_StripsInvalidReasoningItemIDs

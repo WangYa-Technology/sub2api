@@ -9813,6 +9813,7 @@ const form = reactive<SettingsForm>({
   model_plaza_require_auth: false,
   model_plaza_description: '',
   model_plaza_cny_per_usd: 6.8,
+  plugin_management_enabled: false,
   // Affiliate (邀请返利) feature switch
   affiliate_enabled: false,
   // Allow user view error requests

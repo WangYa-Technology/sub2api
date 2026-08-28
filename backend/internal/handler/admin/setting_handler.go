@@ -382,10 +382,11 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 
 		AvailableChannelsEnabled: settings.AvailableChannelsEnabled,
 
-		ModelPlazaEnabled:     settings.ModelPlazaEnabled,
-		ModelPlazaRequireAuth: settings.ModelPlazaRequireAuth,
-		ModelPlazaDescription: settings.ModelPlazaDescription,
-		ModelPlazaCNYPerUSD:   settings.ModelPlazaCNYPerUSD,
+		ModelPlazaEnabled:       settings.ModelPlazaEnabled,
+		PluginManagementEnabled: settings.PluginManagementEnabled,
+		ModelPlazaRequireAuth:   settings.ModelPlazaRequireAuth,
+		ModelPlazaDescription:   settings.ModelPlazaDescription,
+		ModelPlazaCNYPerUSD:     settings.ModelPlazaCNYPerUSD,
 
 		AffiliateEnabled: settings.AffiliateEnabled,
 

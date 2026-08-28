@@ -201,10 +201,11 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyAvailableChannelsEnabled: "false",
 
 		// Model plaza feature (default disabled; opt-in, public unless require_auth)
-		SettingKeyModelPlazaEnabled:     "false",
-		SettingKeyModelPlazaRequireAuth: "false",
-		SettingKeyModelPlazaDescription: "",
-		SettingKeyModelPlazaCNYPerUSD:   strconv.FormatFloat(ModelPlazaCNYPerUSDDefault, 'f', -1, 64),
+		SettingKeyModelPlazaEnabled:       "false",
+		SettingKeyPluginManagementEnabled: "false",
+		SettingKeyModelPlazaRequireAuth:   "false",
+		SettingKeyModelPlazaDescription:   "",
+		SettingKeyModelPlazaCNYPerUSD:     strconv.FormatFloat(ModelPlazaCNYPerUSDDefault, 'f', -1, 64),
 
 		// Affiliate (邀请返利) feature (default disabled; opt-in)
 		SettingKeyAffiliateEnabled:              "false",
@@ -819,6 +820,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 
 	// Model plaza feature (default: disabled; strict true)
 	result.ModelPlazaEnabled = settings[SettingKeyModelPlazaEnabled] == "true"
+	result.PluginManagementEnabled = settings[SettingKeyPluginManagementEnabled] == "true"
 	result.ModelPlazaRequireAuth = settings[SettingKeyModelPlazaRequireAuth] == "true"
 	result.ModelPlazaDescription = settings[SettingKeyModelPlazaDescription]
 	result.ModelPlazaCNYPerUSD = parseModelPlazaCNYPerUSD(settings[SettingKeyModelPlazaCNYPerUSD])

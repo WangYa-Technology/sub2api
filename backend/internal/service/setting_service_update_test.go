@@ -238,6 +238,27 @@ func TestSettingService_UpdateSettings_PersistsCompactHomeEnabled(t *testing.T) 
 	require.Equal(t, "true", repo.updates[SettingKeyCompactHomeEnabled])
 }
 
+func TestSettingService_UpdateSettings_PersistsPluginManagementEnabled(t *testing.T) {
+	repo := &settingUpdateRepoStub{}
+	svc := NewSettingService(repo, &config.Config{})
+
+	err := svc.UpdateSettings(context.Background(), &SystemSettings{PluginManagementEnabled: true})
+
+	require.NoError(t, err)
+	require.Equal(t, "true", repo.updates[SettingKeyPluginManagementEnabled])
+}
+
+func TestSettingService_GetAllSettings_ParsesPluginManagementEnabled(t *testing.T) {
+	svc := NewSettingService(&settingGetAllRepoStub{values: map[string]string{
+		SettingKeyPluginManagementEnabled: "true",
+	}}, &config.Config{})
+
+	settings, err := svc.GetAllSettings(context.Background())
+
+	require.NoError(t, err)
+	require.True(t, settings.PluginManagementEnabled)
+}
+
 func TestSettingService_UpdateSettings_DefaultSubscriptions_ValidGroup(t *testing.T) {
 	repo := &settingUpdateRepoStub{}
 	groupReader := &defaultSubGroupReaderStub{

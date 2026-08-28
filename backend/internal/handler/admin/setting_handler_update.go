@@ -1961,6 +1961,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.ModelPlazaCNYPerUSD
 		}(),
+		PluginManagementEnabled: func() bool {
+			if req.PluginManagementEnabled != nil {
+				return *req.PluginManagementEnabled
+			}
+			return previousSettings.PluginManagementEnabled
+		}(),
 		AffiliateEnabled: func() bool {
 			if req.AffiliateEnabled != nil {
 				return *req.AffiliateEnabled
@@ -2380,10 +2386,11 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 
 		AvailableChannelsEnabled: updatedSettings.AvailableChannelsEnabled,
 
-		ModelPlazaEnabled:     updatedSettings.ModelPlazaEnabled,
-		ModelPlazaRequireAuth: updatedSettings.ModelPlazaRequireAuth,
-		ModelPlazaDescription: updatedSettings.ModelPlazaDescription,
-		ModelPlazaCNYPerUSD:   updatedSettings.ModelPlazaCNYPerUSD,
+		ModelPlazaEnabled:       updatedSettings.ModelPlazaEnabled,
+		ModelPlazaRequireAuth:   updatedSettings.ModelPlazaRequireAuth,
+		ModelPlazaDescription:   updatedSettings.ModelPlazaDescription,
+		ModelPlazaCNYPerUSD:     updatedSettings.ModelPlazaCNYPerUSD,
+		PluginManagementEnabled: updatedSettings.PluginManagementEnabled,
 
 		AffiliateEnabled: updatedSettings.AffiliateEnabled,
 

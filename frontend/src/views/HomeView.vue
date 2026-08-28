@@ -90,6 +90,28 @@
     </footer>
   </div>
 
+  <!-- HCAI Home Page -->
+  <div
+    v-else-if="hcaiHomeReady"
+    ref="homeRoot"
+    class="min-h-screen bg-white dark:bg-[#080c0c]"
+    v-html="homeHtml"
+  ></div>
+
+  <Teleport v-if="themeToggleReady" to="[data-home-theme-slot]">
+    <button
+      type="button"
+      class="hc-theme-toggle"
+      :aria-label="themeToggleLabel"
+      :aria-pressed="isDark"
+      :title="themeToggleLabel"
+      data-home-theme-toggle
+      @click="toggleTheme"
+    >
+      <Icon :name="isDark ? 'sun' : 'moon'" size="sm" :stroke-width="1.8" aria-hidden="true" />
+    </button>
+  </Teleport>
+
   <!-- Default Home Page -->
   <div
     v-else
@@ -494,18 +516,119 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore, useAppStore } from '@/stores'
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { sanitizeUrl } from '@/utils/url'
 import { FeatureFlags, isFeatureFlagEnabled } from '@/utils/featureFlags'
+import {
+  isDarkTheme,
+  setTheme,
+  THEME_CHANGE_EVENT,
+  type ThemeChangeDetail,
+} from '@/utils/theme'
 
 const { t } = useI18n()
 
 const authStore = useAuthStore()
 const appStore = useAppStore()
+const homeRoot = ref<HTMLElement | null>(null)
+const homeHtml = ref('')
+const hcaiHomeReady = ref(false)
+const isDark = ref(isDarkTheme())
+const themeToggleReady = ref(false)
+const themeToggleLabel = computed(() => (isDark.value ? '切换至亮色模式' : '切换至暗色模式'))
+
+let stylesheetElement: HTMLLinkElement | null = null
+let scriptElement: HTMLScriptElement | null = null
+
+function toggleTheme() {
+  setTheme(isDark.value ? 'light' : 'dark')
+}
+
+function handleThemeChange(event: Event) {
+  const detail = (event as CustomEvent<ThemeChangeDetail>).detail
+  isDark.value = detail.theme === 'dark'
+}
+
+function ensureStylesheet() {
+  if (document.querySelector('link[data-hcai-home-style]')) return
+
+  stylesheetElement = document.createElement('link')
+  stylesheetElement.rel = 'stylesheet'
+  stylesheetElement.href = '/hcai/style.css?v=home-theme-v1'
+  stylesheetElement.dataset.hcaiHomeStyle = 'true'
+  document.head.appendChild(stylesheetElement)
+}
+
+function rewriteStaticAssetPaths(container: HTMLElement) {
+  container.querySelectorAll<HTMLElement>('[src], [href]').forEach((element) => {
+    const attribute = element.hasAttribute('src') ? 'src' : 'href'
+    const value = element.getAttribute(attribute)
+    if (value?.startsWith('./')) element.setAttribute(attribute, `/hcai/${value.slice(2)}`)
+  })
+}
+
+function addPublicModelPlazaEntry(container: HTMLElement) {
+  if (!showModelPlazaEntry.value || container.querySelector('[data-model-plaza-entry]')) return
+
+  const navCta = container.querySelector<HTMLElement>('.hc-nav__cta')
+  if (!navCta) return
+
+  const entry = document.createElement('a')
+  entry.href = '/model-plaza'
+  entry.target = '_parent'
+  entry.dataset.modelPlazaEntry = 'true'
+  entry.textContent = '模型广场'
+  navCta.before(entry)
+}
+
+function applyPublicDocUrl(container: HTMLElement) {
+  const link = container.querySelector<HTMLAnchorElement>('[data-home-doc-link]')
+  if (!link) return
+
+  const url = docUrl.value
+  if (!url) {
+    link.remove()
+    return
+  }
+  link.href = url
+}
+
+function runPageScript() {
+  scriptElement?.remove()
+  scriptElement = document.createElement('script')
+  scriptElement.src = '/hcai/main.js?v=gpt56-planets'
+  scriptElement.dataset.hcaiHomeScript = 'true'
+  document.body.appendChild(scriptElement)
+}
+
+async function loadHcaiHome() {
+  try {
+    ensureStylesheet()
+    const response = await fetch('/hcai/page.html', { cache: 'no-cache' })
+    if (!response.ok) throw new Error(`HCAI home request failed: ${response.status}`)
+
+    const html = await response.text()
+    const documentFragment = new DOMParser().parseFromString(html, 'text/html')
+    const page = documentFragment.querySelector<HTMLElement>('.hc-page')
+    if (!page) throw new Error('HCAI home page container not found')
+
+    rewriteStaticAssetPaths(page)
+    applyPublicDocUrl(page)
+    addPublicModelPlazaEntry(page)
+    homeHtml.value = page.outerHTML
+    hcaiHomeReady.value = true
+    await nextTick()
+    themeToggleReady.value = true
+    runPageScript()
+  } catch (error) {
+    // The regular home remains rendered when the optional HCAI bundle is unavailable.
+    console.warn('[home] failed to load HCAI home:', error)
+  }
+}
 
 // Site settings - directly from appStore (already initialized from injected config)
 const siteName = computed(() => appStore.cachedPublicSettings?.site_name || appStore.siteName || 'Sub2API')
@@ -522,9 +645,6 @@ const isHomeContentUrl = computed(() => {
   const content = homeContent.value.trim()
   return content.startsWith('http://') || content.startsWith('https://')
 })
-
-// Theme
-const isDark = ref(document.documentElement.classList.contains('dark'))
 
 // GitHub URL
 const githubUrl = 'https://github.com/Wei-Shaw/sub2api'
@@ -548,35 +668,25 @@ const userInitial = computed(() => {
 // Current year for footer
 const currentYear = computed(() => new Date().getFullYear())
 
-// Toggle theme
-function toggleTheme() {
-  isDark.value = !isDark.value
-  document.documentElement.classList.toggle('dark', isDark.value)
-  localStorage.setItem('theme', isDark.value ? 'dark' : 'light')
-}
-
-// Initialize theme
-function initTheme() {
-  const savedTheme = localStorage.getItem('theme')
-  if (
-    savedTheme === 'dark' ||
-    (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)
-  ) {
-    isDark.value = true
-    document.documentElement.classList.add('dark')
-  }
-}
-
 onMounted(() => {
-  initTheme()
-
-  // Check auth state
+  document.addEventListener(THEME_CHANGE_EVENT, handleThemeChange)
   authStore.checkAuth()
 
-  // Ensure public settings are loaded (will use cache if already loaded from injected config)
-  if (!appStore.publicSettingsLoaded) {
-    appStore.fetchPublicSettings()
-  }
+  void (async () => {
+    if (!hasHomeContent.value && !compactHomeEnabled.value) {
+      if (!appStore.publicSettingsLoaded) await appStore.fetchPublicSettings()
+      if (!hasHomeContent.value && !compactHomeEnabled.value) await loadHcaiHome()
+    }
+  })()
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener(THEME_CHANGE_EVENT, handleThemeChange)
+  themeToggleReady.value = false
+  scriptElement?.remove()
+  scriptElement = null
+  stylesheetElement?.remove()
+  stylesheetElement = null
 })
 </script>
 

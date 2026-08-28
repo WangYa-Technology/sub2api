@@ -11501,6 +11501,8 @@ async function saveSettings() {
       model_plaza_require_auth: form.model_plaza_require_auth,
       model_plaza_description: form.model_plaza_description,
       model_plaza_cny_per_usd: Number(form.model_plaza_cny_per_usd) || 6.8,
+      // Plugin management menu visibility switch
+      plugin_management_enabled: form.plugin_management_enabled,
       // Affiliate (邀请返利) feature switch
       affiliate_enabled: form.affiliate_enabled,
       allow_user_view_error_requests: form.allow_user_view_error_requests,

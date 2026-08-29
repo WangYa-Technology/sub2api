@@ -98,19 +98,28 @@
     v-html="homeHtml"
   ></div>
 
-  <Teleport v-if="themeToggleReady" to="[data-home-theme-slot]">
-    <button
-      type="button"
-      class="hc-theme-toggle"
-      :aria-label="themeToggleLabel"
-      :aria-pressed="isDark"
-      :title="themeToggleLabel"
-      data-home-theme-toggle
-      @click="toggleTheme"
-    >
-      <Icon :name="isDark ? 'sun' : 'moon'" size="sm" :stroke-width="1.8" aria-hidden="true" />
-    </button>
-  </Teleport>
+  <!-- Keep a stable first paint while public settings and HCAI assets resolve. -->
+  <div
+    v-else-if="hcaiHomeState === 'loading'"
+    data-testid="hcai-home-loading"
+    class="flex min-h-screen items-center justify-center bg-white px-6 dark:bg-[#080c0c]"
+    role="status"
+    aria-live="polite"
+  >
+    <div class="flex flex-col items-center">
+      <img
+        src="/hcai/hcai-logo.svg"
+        alt="HCAI"
+        class="w-44 max-w-[70vw] sm:w-52"
+      />
+      <div class="mt-7 flex h-4 items-center gap-2" aria-hidden="true">
+        <span class="h-2 w-2 rounded-full bg-[#f64239] motion-safe:animate-pulse"></span>
+        <span class="h-2 w-2 rounded-full bg-[#f64239] motion-safe:animate-pulse motion-safe:[animation-delay:150ms]"></span>
+        <span class="h-2 w-2 rounded-full bg-[#f64239] motion-safe:animate-pulse motion-safe:[animation-delay:300ms]"></span>
+      </div>
+      <span class="sr-only">正在加载 HCAI 首页</span>
+    </div>
+  </div>
 
   <!-- Default Home Page -->
   <div
@@ -513,6 +522,20 @@
       </div>
     </footer>
   </div>
+
+  <Teleport v-if="themeToggleReady" to="[data-home-theme-slot]">
+    <button
+      type="button"
+      class="hc-theme-toggle"
+      :aria-label="themeToggleLabel"
+      :aria-pressed="isDark"
+      :title="themeToggleLabel"
+      data-home-theme-toggle
+      @click="toggleTheme"
+    >
+      <Icon :name="isDark ? 'sun' : 'moon'" size="sm" :stroke-width="1.8" aria-hidden="true" />
+    </button>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
@@ -536,13 +559,16 @@ const authStore = useAuthStore()
 const appStore = useAppStore()
 const homeRoot = ref<HTMLElement | null>(null)
 const homeHtml = ref('')
-const hcaiHomeReady = ref(false)
+type HcaiHomeState = 'loading' | 'ready' | 'failed'
+const hcaiHomeState = ref<HcaiHomeState>('loading')
+const hcaiHomeReady = computed(() => hcaiHomeState.value === 'ready')
 const isDark = ref(isDarkTheme())
 const themeToggleReady = ref(false)
 const themeToggleLabel = computed(() => (isDark.value ? '切换至亮色模式' : '切换至暗色模式'))
 
 let stylesheetElement: HTMLLinkElement | null = null
 let scriptElement: HTMLScriptElement | null = null
+let isUnmounted = false
 
 function toggleTheme() {
   setTheme(isDark.value ? 'light' : 'dark')
@@ -553,14 +579,31 @@ function handleThemeChange(event: Event) {
   isDark.value = detail.theme === 'dark'
 }
 
+function waitForStylesheet(link: HTMLLinkElement) {
+  if (link.sheet || link.dataset.hcaiHomeStyleLoaded === 'true') return Promise.resolve()
+
+  return new Promise<void>((resolve, reject) => {
+    link.addEventListener('load', () => {
+      link.dataset.hcaiHomeStyleLoaded = 'true'
+      resolve()
+    }, { once: true })
+    link.addEventListener('error', () => reject(new Error('HCAI home stylesheet failed to load')), {
+      once: true,
+    })
+  })
+}
+
 function ensureStylesheet() {
-  if (document.querySelector('link[data-hcai-home-style]')) return
+  const existing = document.querySelector<HTMLLinkElement>('link[data-hcai-home-style]')
+  if (existing) return waitForStylesheet(existing)
 
   stylesheetElement = document.createElement('link')
   stylesheetElement.rel = 'stylesheet'
   stylesheetElement.href = '/hcai/style.css?v=home-theme-v1'
   stylesheetElement.dataset.hcaiHomeStyle = 'true'
+  const stylesheetReady = waitForStylesheet(stylesheetElement)
   document.head.appendChild(stylesheetElement)
+  return stylesheetReady
 }
 
 function rewriteStaticAssetPaths(container: HTMLElement) {
@@ -606,8 +649,9 @@ function runPageScript() {
 }
 
 async function loadHcaiHome() {
+  hcaiHomeState.value = 'loading'
   try {
-    ensureStylesheet()
+    const stylesheetReady = ensureStylesheet()
     const response = await fetch('/hcai/page.html', { cache: 'no-cache' })
     if (!response.ok) throw new Error(`HCAI home request failed: ${response.status}`)
 
@@ -619,13 +663,19 @@ async function loadHcaiHome() {
     rewriteStaticAssetPaths(page)
     applyPublicDocUrl(page)
     addPublicModelPlazaEntry(page)
+    await stylesheetReady
+    if (isUnmounted) return
+
     homeHtml.value = page.outerHTML
-    hcaiHomeReady.value = true
+    hcaiHomeState.value = 'ready'
     await nextTick()
+    if (isUnmounted) return
+
     themeToggleReady.value = true
     runPageScript()
   } catch (error) {
-    // The regular home remains rendered when the optional HCAI bundle is unavailable.
+    if (isUnmounted) return
+    hcaiHomeState.value = 'failed'
     console.warn('[home] failed to load HCAI home:', error)
   }
 }
@@ -681,6 +731,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  isUnmounted = true
   document.removeEventListener(THEME_CHANGE_EVENT, handleThemeChange)
   themeToggleReady.value = false
   scriptElement?.remove()

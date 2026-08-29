@@ -81,6 +81,8 @@ export default {
       notes: '备注',
       notesPlaceholder: '请输入备注',
       notesHint: '备注可选',
+      fromModel: '源模型',
+      toModel: '目标模型',
       // Filter options
       allPlatforms: '全部平台',
       allTypes: '全部类型',

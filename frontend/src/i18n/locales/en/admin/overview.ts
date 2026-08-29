@@ -442,6 +442,7 @@ export default {
       title: 'User Management',
       description: 'Manage users and their permissions',
       createUser: 'Create User',
+      passwordCopied: 'Password copied',
       bulkLimits: {
         action: 'Set limits ({count})',
         title: 'Set user limits',

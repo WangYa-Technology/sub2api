@@ -82,6 +82,8 @@ export default {
       notes: 'Notes',
       notesPlaceholder: 'Enter notes',
       notesHint: 'Notes are optional',
+      fromModel: 'Source model',
+      toModel: 'Target model',
       allPlatforms: 'All Platforms',
       allTypes: 'All Types',
       allStatus: 'All Status',

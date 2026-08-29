@@ -574,7 +574,7 @@ async function handleUnbind(provider: BindableProvider, providerLabel: string): 
     applyUpdatedUser(user)
     appStore.showSuccess(t('profile.authBindings.unbindSuccess', { providerName: providerLabel }))
   } catch (error) {
-    appStore.showError((error as { message?: string }).message || t('common.tryAgain'))
+    appStore.showError((error as { message?: string }).message || t('errors.tryAgain'))
   } finally {
     unbindingProvider.value = null
   }
@@ -652,7 +652,7 @@ async function bindEmail(): Promise<void> {
         : t('profile.authBindings.bindSuccess')
     )
   } catch (error) {
-    appStore.showError((error as { message?: string }).message || t('common.tryAgain'))
+    appStore.showError((error as { message?: string }).message || t('errors.tryAgain'))
   } finally {
     isBindingEmail.value = false
   }

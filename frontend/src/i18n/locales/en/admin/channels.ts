@@ -54,6 +54,8 @@ export default {
       pricingUnit: 'pricing rules',
       noChannelsYet: 'No Channels Yet',
       createFirstChannel: 'Create your first channel to manage model pricing',
+      noGroupsSelected: 'Select at least one group for {platform}',
+      emptyModelsInPricing: 'Add at least one model to each {platform} pricing rule',
       loadError: 'Failed to load channels',
       createSuccess: 'Channel created',
       updateSuccess: 'Channel updated',

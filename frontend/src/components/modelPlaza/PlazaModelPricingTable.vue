@@ -22,25 +22,76 @@
             {{ t('modelPlaza.table.model') }}
           </th>
           <th colspan="3" class="pz-bg pt-2 text-center">
-            <div class="pz-title border-b pb-2 font-semibold">
-              {{ t('modelPlaza.table.paidPrice') }}
-              <span class="pz-unit ml-1 normal-case font-normal">{{ t('modelPlaza.table.unitPerMillion') }}</span>
+            <div class="pz-title flex items-center justify-center gap-1 border-b pb-2 font-semibold">
+              <span>
+                {{ t('modelPlaza.table.paidPrice') }}
+                <span class="pz-unit ml-1 normal-case font-normal">{{ t('modelPlaza.table.paidUnitPerMillion') }}</span>
+              </span>
+              <HelpTooltip
+                :content="t('modelPlaza.table.paidPriceHelp')"
+                placement="bottom"
+                data-testid="paid-price-help"
+              >
+                <template #trigger>
+                  <button
+                    type="button"
+                    class="pz-help inline-flex rounded-full p-0.5 transition-colors hover:bg-black/5 dark:hover:bg-white/10"
+                    :aria-label="t('modelPlaza.table.paidPriceHelpLabel')"
+                  >
+                    <Icon name="infoCircle" size="xs" class="h-3.5 w-3.5" />
+                  </button>
+                </template>
+              </HelpTooltip>
             </div>
           </th>
           <th
             colspan="3"
             class="border-l border-gray-100 pt-2 text-center dark:border-dark-700/60"
           >
-            <div class="border-b border-gray-200 pb-2 text-gray-400 dark:border-dark-600 dark:text-dark-500">
-              {{ t('modelPlaza.table.officialPrice') }}
-              <span class="ml-1 normal-case font-normal text-gray-400 dark:text-dark-500">{{ t('modelPlaza.table.unitPerMillion') }}</span>
+            <div class="flex items-center justify-center gap-1 border-b border-gray-200 pb-2 text-gray-400 dark:border-dark-600 dark:text-dark-500">
+              <span>
+                {{ t('modelPlaza.table.officialPrice') }}
+                <span class="ml-1 normal-case font-normal text-gray-400 dark:text-dark-500">{{ t('modelPlaza.table.officialUnitPerMillion') }}</span>
+              </span>
+              <HelpTooltip
+                :content="t('modelPlaza.table.officialPriceHelp')"
+                placement="bottom"
+                data-testid="official-price-help"
+              >
+                <template #trigger>
+                  <button
+                    type="button"
+                    class="inline-flex rounded-full p-0.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-500 dark:text-dark-500 dark:hover:bg-dark-700 dark:hover:text-dark-400"
+                    :aria-label="t('modelPlaza.table.officialPriceHelpLabel')"
+                  >
+                    <Icon name="infoCircle" size="xs" class="h-3.5 w-3.5" />
+                  </button>
+                </template>
+              </HelpTooltip>
             </div>
           </th>
           <th
             rowspan="2"
             class="border-l border-gray-100 py-2.5 pl-3 pr-5 text-right align-middle dark:border-dark-700/60"
           >
-            {{ t('modelPlaza.table.rate') }}
+            <span class="inline-flex items-center justify-end gap-1">
+              {{ t('modelPlaza.table.rate') }}
+              <HelpTooltip
+                :content="t('modelPlaza.table.rateHelp')"
+                placement="bottom-end"
+                data-testid="rate-help"
+              >
+                <template #trigger>
+                  <button
+                    type="button"
+                    class="inline-flex rounded-full p-0.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-500 dark:text-dark-500 dark:hover:bg-dark-700 dark:hover:text-dark-400"
+                    :aria-label="t('modelPlaza.table.rateHelpLabel')"
+                  >
+                    <Icon name="infoCircle" size="xs" class="h-3.5 w-3.5" />
+                  </button>
+                </template>
+              </HelpTooltip>
+            </span>
           </th>
         </tr>
         <tr
@@ -257,15 +308,15 @@
             <span v-else class="text-gray-400 dark:text-dark-500">-</span>
           </td>
 
-          <!-- 折扣倍率(分时时段行展示 生效倍率×时段倍率;生图独立倍率行展示独立倍率;专属倍率划线展示原倍率) -->
+          <!-- Token 模型展示人民币实付输出价折算后的近似折扣;非 Token 模型展示计费倍率。 -->
           <td
             class="border-l border-gray-100 py-2.5 pl-3 pr-5 text-right align-middle font-mono text-xs dark:border-dark-700/60"
           >
             <span
-              v-if="period"
+              v-if="billingMode(m) === BILLING_MODE_TOKEN"
               class="font-bold text-primary-600 dark:text-primary-400"
-              :title="t('modelPlaza.table.timePricingRateHint', { rate: effectiveRate, multiplier: period.multiplier })"
-              >{{ periodRate(period) }}x</span
+              :title="period ? t('modelPlaza.table.timePricingRateHint', { rate: effectiveRate, multiplier: period.multiplier }) : undefined"
+              >{{ approximateRate(m, period) }}</span
             >
             <span
               v-else-if="usesIndependentImageRate(m)"
@@ -287,6 +338,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import HelpTooltip from '@/components/common/HelpTooltip.vue'
+import Icon from '@/components/icons/Icon.vue'
 import { formatScaled } from '@/utils/pricing'
 import { platformAccentColor, platformBadgeLightClass, platformLabel } from '@/utils/platformColors'
 import {
@@ -305,6 +358,8 @@ const props = defineProps<{
   rateMultiplier: number
   /** 用户专属倍率;与默认不同,实付价按此计算并划线展示原倍率。 */
   userRateMultiplier?: number | null
+  /** 充值换算倍率:多少人民币 = 1 美元。 */
+  cnyPerUsd: number
   /** 生图独立倍率:true 时图片计费模型的实付倍率取 imageRateMultiplier,不取分组/专属倍率。 */
   imageRateIndependent?: boolean
   imageRateMultiplier?: number | null
@@ -323,6 +378,7 @@ const { t } = useI18n()
 const accentStyle = computed(() => ({ '--plaza-accent': platformAccentColor(props.platform ?? '') }))
 
 const PER_MILLION = 1_000_000
+const CNY_PER_USD_REFERENCE = 6.8
 
 /**
  * 展示顺序:
@@ -386,11 +442,11 @@ function periodRate(period: PlazaTimePricingPeriod): number {
   return Math.round(effectiveRate.value * period.multiplier * 1000) / 1000
 }
 
-/** 实付价 = 渠道单价 × 生效倍率(时段行再乘时段倍率),按 $/1M token 展示。 */
+/** 实付价 = 渠道单价 × 生效倍率 × 充值换算倍率;时段行额外乘时段倍率。 */
 function paidPerMillion(value: number | null | undefined, period: PlazaTimePricingPeriod | null = null): string {
   if (value == null) return '-'
   const rate = period ? periodRate(period) : effectiveRate.value
-  return formatScaled(value * rate, PER_MILLION, MIN_DECIMALS)
+  return formatScaled(value * rate * props.cnyPerUsd, PER_MILLION, MIN_DECIMALS, '¥')
 }
 
 /** 图片计费模型且分组开启生图独立倍率:实付倍率取独立倍率,与计费口径一致。 */
@@ -403,16 +459,38 @@ function requestRate(m: PlazaModel): number {
   return usesIndependentImageRate(m) ? (props.imageRateMultiplier ?? 1) : effectiveRate.value
 }
 
-/** 按次 / 按图片单价(乘该行生效倍率,不换算 1M)。 */
+/** 按次 / 按图片单价(乘该行生效倍率与充值换算倍率,不换算 1M)。 */
 function paidRequestPrice(m: PlazaModel, value: number | null | undefined): string {
   if (value == null) return '-'
-  return formatScaled(value * requestRate(m), 1, MIN_DECIMALS)
+  return formatScaled(value * requestRate(m) * props.cnyPerUsd, 1, MIN_DECIMALS, '¥')
 }
 
 /** 官方参考价不乘倍率。 */
 function official(value: number | null | undefined): string {
   if (value == null) return '-'
   return formatScaled(value, PER_MILLION, MIN_DECIMALS)
+}
+
+/**
+ * 近似折扣只比较输出价。分时时段行使用该时段的生效倍率，保持与实付列一致。
+ * 渠道基础输出价缺失时，使用第一档有效的阶梯输出价。
+ */
+function approximateRate(
+  m: PlazaModel,
+  period: PlazaTimePricingPeriod | null = null
+): string {
+  const channelOutput =
+    m.pricing?.output_price ??
+    tokenIntervals(m).find((interval) => interval.output_price != null)?.output_price
+  const officialOutput = m.official_pricing?.output_price
+  if (channelOutput == null || officialOutput == null || officialOutput <= 0) return '-'
+
+  const rate = period ? periodRate(period) : effectiveRate.value
+  const paidCny = channelOutput * rate * props.cnyPerUsd
+  const value = paidCny / CNY_PER_USD_REFERENCE / officialOutput
+  if (!Number.isFinite(value)) return '-'
+  const formatted = value.toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1')
+  return t('modelPlaza.table.approxRate', { value: formatted })
 }
 
 /** 非 token 计费的单位后缀:按图片 → “/ 张”,按次 → “/ 次”。 */

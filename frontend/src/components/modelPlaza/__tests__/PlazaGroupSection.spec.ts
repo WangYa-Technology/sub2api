@@ -76,7 +76,7 @@ function group(overrides: Partial<ModelPlazaGroup> = {}): ModelPlazaGroup {
 
 function mountSection(g: ModelPlazaGroup) {
   return mount(PlazaGroupSection, {
-    props: { group: g },
+    props: { group: g, cnyPerUsd: 6.8 },
     global: {
       stubs: {
         GroupBadge: true,
@@ -128,6 +128,7 @@ describe('PlazaGroupSection 高峰配置传递', () => {
     )
     const table = wrapper.findComponent(PlazaModelPricingTable)
     // appStore mock 无 server_utc_offset,窗口描述不带时区标注
+    expect(table.props('cnyPerUsd')).toBe(6.8)
     expect(table.props('peakWindow')).toBe('14:00-18:00 ×1.5')
     expect(table.props('peakRateMultiplier')).toBe(1.5)
   })

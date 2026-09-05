@@ -226,9 +226,10 @@ func (s *ModelPlazaService) ListGroups(ctx context.Context) ([]PlazaGroup, error
 func (s *ModelPlazaService) fillDisplayPricing(ctx context.Context, m *PlazaModel, g *Group) {
 	if s.billingService != nil && s.resolver != nil {
 		sched, err := s.billingService.ResolveContextPricingSchedule(ctx, s.resolver, ContextPricingScheduleInput{
-			Model:    m.Name,
-			Group:    g,
-			Platform: m.Platform,
+			Model:                m.Name,
+			Group:                g,
+			Platform:             m.Platform,
+			PreferChannelPricing: true,
 		})
 		if err == nil && sched != nil && len(sched.Tiers) > 0 {
 			m.Pricing = plazaPricingFromSchedule(m.Pricing, sched)

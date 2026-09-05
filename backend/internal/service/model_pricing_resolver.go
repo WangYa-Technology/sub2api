@@ -44,7 +44,7 @@ type ResolvedPricing struct {
 }
 
 // ModelPricingResolver 统一模型定价解析器。
-// 解析链：Group → Channel → LiteLLM → Fallback。
+// 解析链：Channel → Group → LiteLLM → Fallback。
 type ModelPricingResolver struct {
 	channelService *ChannelService
 	billingService *BillingService
@@ -65,11 +65,17 @@ type PricingInput struct {
 	Group   *Group
 }
 
-// Resolve 解析模型定价。
-// 1. 获取基础定价（LiteLLM → Fallback）
-// 2. 如果指定了 GroupID，查找渠道定价并覆盖
+// Resolve 解析模型定价。渠道中明确配置的模型定价拥有最高优先级；没有渠道定价时才使用分组定价。
 func (r *ModelPricingResolver) Resolve(ctx context.Context, input PricingInput) *ResolvedPricing {
 	longContextPricingEnabled := input.Group == nil || input.Group.LongContextPricingEnabled
+	if input.GroupID != nil && r.channelService != nil {
+		if chPricing := r.channelService.GetChannelModelPricing(ctx, *input.GroupID, input.Model); chPricing != nil {
+			resolved := r.resolveConfiguredPricing(chPricing, input.Model, PricingSourceChannel)
+			resolved.longContextPricingEnabled = longContextPricingEnabled
+			return resolved
+		}
+	}
+
 	if groupPricing := matchGroupModelPricing(input.Group, input.Model); groupPricing != nil {
 		// Group token cards only override the first-tier / flat rates.
 		// Long-context ladders come from official presets, gated by the checkbox.
@@ -83,28 +89,7 @@ func (r *ModelPricingResolver) Resolve(ctx context.Context, input PricingInput) 
 		return resolved
 	}
 
-	var chPricing *ChannelModelPricing
-	if input.GroupID != nil && r.channelService != nil {
-		chPricing = r.channelService.GetChannelModelPricing(ctx, *input.GroupID, input.Model)
-		if chPricing != nil {
-			mode := chPricing.BillingMode
-			if mode == "" {
-				mode = BillingModeToken
-			}
-			if mode == BillingModePerRequest || mode == BillingModeImage || mode == BillingModeVideo {
-				resolved := &ResolvedPricing{
-					Mode:           mode,
-					Source:         PricingSourceChannel,
-					channelPricing: chPricing,
-				}
-				resolved.longContextPricingEnabled = longContextPricingEnabled
-				r.applyRequestTierOverrides(chPricing, resolved)
-				return resolved
-			}
-		}
-	}
-
-	// 1. 获取基础定价
+	// 获取基础定价
 	basePricing, source := r.resolveBasePricing(input.Model)
 
 	resolved := &ResolvedPricing{
@@ -114,15 +99,6 @@ func (r *ModelPricingResolver) Resolve(ctx context.Context, input PricingInput) 
 		SupportsCacheBreakdown: basePricing != nil && basePricing.SupportsCacheBreakdown,
 	}
 	resolved.longContextPricingEnabled = longContextPricingEnabled
-
-	// 2. 如果有 GroupID，尝试渠道覆盖
-	if chPricing != nil {
-		resolved.Source = PricingSourceChannel
-		resolved.channelPricing = chPricing
-		r.applyTokenOverrides(chPricing, resolved)
-	} else if input.GroupID != nil && r.channelService != nil {
-		r.applyChannelOverrides(ctx, *input.GroupID, input.Model, resolved)
-	}
 
 	return resolved
 }

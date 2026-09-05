@@ -72,7 +72,7 @@ const contextProbeDelta = 1000
 
 // ResolveContextPricingSchedule 解析分组+模型的上下文阶梯单价表。
 //
-// 解析链与扣费完全一致：Resolver.Resolve（分组卡 → 渠道 → 目录 → 策略）给出定价，
+// 解析链与扣费完全一致：Resolver.Resolve（渠道 → 分组卡 → 目录 → 策略）给出定价，
 // CalculateTokenCostForRequest 给出路径（分组/渠道定价 → 平台旧规则 → 内置目录）。
 // 断点只取自计费自身的规则输入（渠道区间边界、目录阶梯阈值、旧规则阈值），
 // 每一段的单价由真实计费函数在该段内两点探针的差商得到，因此倍率、策略等
@@ -149,7 +149,7 @@ func (s *BillingService) ResolveContextPricingSchedule(ctx context.Context, reso
 
 // resolvedTimePricingSchedule 列出计费会生效的分时倍率时段。
 // 时段来自解析到的渠道定价配置，每个时段的倍率用计费自己的 resolvedChannelTimeMultiplier
-// 在时段内取值：定价来源不是渠道（分组价卡覆盖）、配置非法等情况下计费按 1 计，
+// 在时段内取值：定价来源不是渠道（如分组价卡覆盖）、配置非法等情况下计费按 1 计，
 // 这里也就自然得到"无分时"。倍率为 1 的时段不列出。
 func resolvedTimePricingSchedule(resolved *ResolvedPricing) *TimePricingSchedule {
 	if resolved == nil || resolved.channelPricing == nil || resolved.channelPricing.TimePricing == nil {

@@ -417,7 +417,7 @@ func TestListGroups_GeminiLegacyRuleShownAsMarginal(t *testing.T) {
 	require.Empty(t, m.OfficialPricing.Intervals)
 }
 
-func TestListGroups_GroupTokenCardOverridesChannelPricing(t *testing.T) {
+func TestListGroups_ChannelTokenPricingOverridesGroupCard(t *testing.T) {
 	channels := []Channel{plazaPricedChannel(1, "ch", []int64{10}, PlatformAnthropic, "claude-sonnet-4")}
 	groups := []Group{{
 		ID: 10, Name: "g", Platform: PlatformAnthropic, RateMultiplier: 1, LongContextPricingEnabled: true,
@@ -427,8 +427,8 @@ func TestListGroups_GroupTokenCardOverridesChannelPricing(t *testing.T) {
 	out, err := svc.ListGroups(context.Background())
 	require.NoError(t, err)
 	m := out[0].Models[0]
-	require.InDelta(t, 1e-6, *m.Pricing.InputPrice, 1e-15, "分组价卡优先于渠道平价")
-	require.InDelta(t, 15e-6, *m.Pricing.OutputPrice, 1e-15, "卡未配置的项回落目录价")
+	require.InDelta(t, 3e-6, *m.Pricing.InputPrice, 1e-15, "渠道输入价覆盖分组价卡")
+	require.InDelta(t, 15e-6, *m.Pricing.OutputPrice, 1e-15, "渠道未配置输出价时回落目录价")
 	require.Empty(t, m.Pricing.Intervals)
 }
 

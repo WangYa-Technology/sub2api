@@ -81,13 +81,29 @@ describe('PlazaModelPricingTable', () => {
   it('实付价乘充值换算倍率,官方价保持美元,近似折扣按指定公式计算', () => {
     const wrapper = mountTable([tokenModel()], 0.5, null, { cnyPerUsd: 0.25 })
     const text = wrapper.text()
-    // 实付人民币 = 美元渠道价 × 分组倍率 × 充值换算倍率
     expect(text).toContain('¥0.375')
     expect(text).toContain('¥1.875')
-    // 官方价原值仍在(官方列不乘倍率)
     expect(text).toContain('$3.00')
     expect(text).toContain('$15.00')
     expect(text).toContain('≈ 0.02 倍')
+  })
+
+  it('shows the Max reasoning billing multiplier', () => {
+    const model = tokenModel()
+    model.pricing!.max_reasoning_effort_multiplier = 3
+    const wrapper = mountTable([model], 1)
+
+    expect(wrapper.text()).toContain('modelPlaza.table.maxReasoningMultiplierBadge')
+    expect(wrapper.find('[title="modelPlaza.table.maxReasoningMultiplierHint"]').exists()).toBe(true)
+  })
+
+  it('倍率 ≠ 1 时价格列为折后实付价,官方价列保持原价', () => {
+    const wrapper = mountTable([tokenModel()], 0.5)
+    const text = wrapper.text()
+    expect(text).toContain('¥1.50')
+    expect(text).toContain('¥7.50')
+    expect(text).toContain('$3.00')
+    expect(text).toContain('$15.00')
   })
 
   it('用户专属倍率覆盖分组倍率并参与人民币实付价与近似折扣计算', () => {

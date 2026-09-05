@@ -1472,6 +1472,8 @@ const applyUpstreamBillingRateSnapshots = async (
     upstreamBillingSortRefreshes.value += 1
     try {
       await load({ refreshTodayStats: false })
+    } catch (error) {
+      console.error('Failed to reconcile upstream billing sort:', error)
     } finally {
       upstreamBillingSortRefreshes.value -= 1
     }
@@ -1496,7 +1498,13 @@ const applyUpstreamBillingRateSnapshots = async (
     else delete nextExtra.upstream_billing_probe
     if (nextIdentity) nextExtra.upstream_identity = nextIdentity
     else delete nextExtra.upstream_identity
-    const nextAccount = { ...account, extra: nextExtra }
+    const nextAccount = {
+      ...account,
+      ...(typeof nextSnapshot?.synced_rate_multiplier === 'number'
+        ? { rate_multiplier: nextSnapshot.synced_rate_multiplier }
+        : {}),
+      extra: nextExtra
+    }
     syncAccountRefs(nextAccount)
     changed = true
     return nextAccount
@@ -1509,9 +1517,8 @@ const applyUpstreamBillingRateSnapshots = async (
 }
 
 const refreshUpstreamBillingRates = async (force = false) => {
-  if (upstreamBillingRateRefreshing.value || loading.value) return
+  if (upstreamBillingRateRefreshing.value || loading.value || accounts.value.length === 0) return
   if (!force && (
-    accounts.value.length === 0 ||
     probingUpstreamBilling.size > 0 ||
     isAnyModalOpen.value ||
     menu.show ||
@@ -1553,6 +1560,11 @@ const refreshUpstreamBillingRates = async (force = false) => {
     }
     upstreamBillingRateRefreshing.value = false
   }
+}
+
+const refreshUpstreamBillingSortedList = async (force = false) => {
+  if (!force && sortState.sort_by !== 'upstream_billing_rate') return
+  await refreshUpstreamBillingRates(force)
 }
 
 const {
@@ -2670,6 +2682,9 @@ const patchUpstreamBillingSnapshot = (accountID: number, snapshot: UpstreamBilli
   const syncedRate = snapshot.synced_rate_multiplier
   const nextAccount: Account = {
     ...account,
+    ...(typeof snapshot.synced_rate_multiplier === 'number'
+      ? { rate_multiplier: snapshot.synced_rate_multiplier }
+      : {}),
     extra: { ...account.extra, upstream_billing_probe: snapshot }
   }
   if (typeof syncedRate === 'number' && Number.isFinite(syncedRate) && syncedRate > 0) {
@@ -2694,11 +2709,7 @@ const showUpstreamActionFeedback = (
   timers.set(accountID, timer)
 }
 const refreshAccountsAfterUpstreamBillingProbe = async () => {
-  try {
-    await load()
-  } catch (error) {
-    console.error('Failed to refresh accounts after upstream billing probe:', error)
-  }
+  await refreshUpstreamBillingSortedList(true)
 }
 const handleProbeUpstreamBilling = async (account: Account) => {
   if (probingUpstreamBilling.has(account.id)) return

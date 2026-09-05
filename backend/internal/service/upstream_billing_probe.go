@@ -130,9 +130,8 @@ type UpstreamBillingProbeResult struct {
 }
 
 // UpstreamBillingRateSnapshotItem is the compact representation used by the
-// account table's background refresh. It intentionally contains only the
-// account ID and the persisted probe snapshot; account credentials, usage
-// counters, and quota data stay on the normal account-list paths.
+// account table's background refresh. It intentionally excludes credentials,
+// runtime counters, and usage data from the response.
 type UpstreamBillingRateSnapshotItem struct {
 	AccountID int64                         `json:"account_id"`
 	Snapshot  *UpstreamBillingProbeSnapshot `json:"snapshot"`
@@ -140,16 +139,17 @@ type UpstreamBillingRateSnapshotItem struct {
 }
 
 // BuildUpstreamBillingRateSnapshotItems projects account rows into the
-// read-only payload used by the rate refresh endpoint. Keeping decoding here
-// ensures malformed or legacy extra data is ignored consistently with the
-// probe scheduler and manual probe handlers.
+// read-only payload used by the rate refresh endpoint. Decode snapshots here
+// so malformed or legacy extra data is handled consistently with probe logic.
 func BuildUpstreamBillingRateSnapshotItems(accounts []Account) []UpstreamBillingRateSnapshotItem {
 	items := make([]UpstreamBillingRateSnapshotItem, 0, len(accounts))
 	for _, account := range accounts {
 		var snapshot *UpstreamBillingProbeSnapshot
 		var identity *UpstreamIdentitySnapshot
-		if account.Platform == PlatformOpenAI && account.Type == AccountTypeAPIKey {
+		if account.Type == AccountTypeAPIKey {
 			snapshot = decodeUpstreamBillingProbeSnapshot(account.Extra)
+		}
+		if account.Platform == PlatformOpenAI && account.Type == AccountTypeAPIKey {
 			identity = decodeDisplayableUpstreamIdentity(account.Extra)
 		}
 		items = append(items, UpstreamBillingRateSnapshotItem{

@@ -277,7 +277,7 @@ func TestBulkUpdateOllamaIdentityCleanupIsValueConditional(t *testing.T) {
 	mock.ExpectCommit()
 	repo := newAccountRepositoryWithSQL(client, db, nil)
 
-	_, err := repo.BulkUpdate(context.Background(), []int64{17}, service.AccountBulkUpdate{
+	_, err = repo.BulkUpdate(context.Background(), []int64{17}, service.AccountBulkUpdate{
 		Credentials: map[string]any{"base_url": "https://www.ollama.com:443/v1"},
 	})
 

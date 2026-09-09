@@ -79,11 +79,14 @@ describe('custom page open button', () => {
     vi.unstubAllGlobals()
   })
 
-  it('preserves the embedded URL, secure link attributes, and normal clicks with small pointer movements', async () => {
+  it('keeps cross-origin embeds free of session credentials and preserves normal clicks', async () => {
     const { wrapper, button } = mountEmbed()
     expect(button.href).toBe(wrapper.get('iframe').attributes('src'))
-    expect(button.href).toContain('user_id=7')
-    expect(button.href).toContain('token=test-token')
+    expect(button.href).not.toContain('user_id=7')
+    expect(button.href).not.toContain('token=test-token')
+    expect(button.href).toContain('theme=light')
+    expect(button.href).toContain('lang=en')
+    expect(button.href).toContain('ui_mode=embedded')
     expect(button.target).toBe('_blank')
     expect(button.rel).toBe('noopener noreferrer')
     await pointer(button, 'pointerdown', 700, 24)

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"database/sql/driver"
 	"encoding/json"
 	"regexp"
 	"strings"
@@ -16,6 +17,24 @@ import (
 	"entgo.io/ent/dialect"
 	entsql "entgo.io/ent/dialect/sql"
 )
+
+type captureOllamaQueriesMatcher struct {
+	queries *[]string
+}
+
+func (m captureOllamaQueriesMatcher) Match(expected, actual string) error {
+	*m.queries = append(*m.queries, actual)
+	return sqlmock.QueryMatcherRegexp.Match(expected, actual)
+}
+
+type captureOllamaArgument struct {
+	value *driver.Value
+}
+
+func (m captureOllamaArgument) Match(value driver.Value) bool {
+	*m.value = value
+	return true
+}
 
 func newOllamaCloudUsageRepositoryTestClient(t *testing.T) (*dbent.Client, sqlmock.Sqlmock) {
 	t.Helper()
@@ -179,7 +198,7 @@ func TestListOllamaCloudUsageGroupAccountsUsesOneStrictBatchQuery(t *testing.T) 
 	require.Empty(t, accounts)
 	query := normalizeSQLWhitespace(capturedSQL)
 	require.Contains(t, query, "credentials ->> 'api_key' = ANY($1)")
-	require.Contains(t, query, "platform IN ('openai', 'anthropic', 'kimi', 'zhipu', 'deepseek')")
+	require.Contains(t, query, "platform IN ('openai', 'anthropic', 'kimi', 'zhipu', 'deepseek', 'minimax')")
 	require.Contains(t, query, "jsonb_typeof(credentials -> 'api_key') = 'string'")
 	require.Contains(t, query, ollamaCloudBaseURLMatchesSQL("credentials ->> 'base_url'"))
 	require.NotContains(t, query, "~*")
@@ -207,7 +226,7 @@ func TestListDueOllamaCloudUsageAccountsFiltersOrdersAndLimits(t *testing.T) {
 	for _, clause := range []string{
 		"deleted_at IS NULL",
 		"status = 'active'",
-		"platform IN ('openai', 'anthropic', 'kimi', 'zhipu', 'deepseek')",
+		"platform IN ('openai', 'anthropic', 'kimi', 'zhipu', 'deepseek', 'minimax')",
 		"type = 'apikey'",
 		ollamaCloudBaseURLMatchesSQL("credentials ->> 'base_url'"),
 		"jsonb_typeof(extra -> 'ollama_cloud_usage_session') = 'string'",
@@ -238,26 +257,49 @@ func TestListDueOllamaCloudUsageAccountsFiltersOrdersAndLimits(t *testing.T) {
 }
 
 func TestBulkUpdateOllamaIdentityCleanupIsValueConditional(t *testing.T) {
-	client, mock := newOllamaCloudUsageRepositoryTestClient(t)
+	var queries []string
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(captureOllamaQueriesMatcher{queries: &queries}))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, db)))
+	t.Cleanup(func() { _ = client.Close() })
+	var capturedPayload driver.Value
 	mock.ExpectBegin()
 	mock.ExpectQuery(`(?s)SELECT id,.*FOR NO KEY UPDATE`).
 		WithArgs(sqlmock.AnyArg(), []byte(`{"base_url":"https://www.ollama.com:443/v1"}`)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "changed"}).AddRow(int64(17), false))
 	mock.ExpectExec(`(?s)UPDATE accounts SET credentials = .*extra = CASE.*ollama_cloud_usage_session.*ollama_cloud_usage_auto_refresh.*ollama_cloud_usage_snapshot.*WHERE id = ANY\(\$2\)`).
-		WithArgs([]byte(`{"base_url":"https://www.ollama.com:443/v1"}`), sqlmock.AnyArg()).
+		WithArgs(captureOllamaArgument{value: &capturedPayload}, sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox")).
 		WithArgs(service.SchedulerOutboxEventAccountBulkChanged, nil, nil, sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
-	repo := newAccountRepositoryWithSQL(client, nil, nil)
+	repo := newAccountRepositoryWithSQL(client, db, nil)
 
-	_, err := repo.BulkUpdate(context.Background(), []int64{17}, service.AccountBulkUpdate{
+	_, err = repo.BulkUpdate(context.Background(), []int64{17}, service.AccountBulkUpdate{
 		Credentials: map[string]any{"base_url": "https://www.ollama.com:443/v1"},
 	})
 
 	require.NoError(t, err)
 	require.NoError(t, mock.ExpectationsWereMet())
+	var updateQuery string
+	for _, query := range queries {
+		if strings.Contains(query, "UPDATE accounts SET credentials") {
+			updateQuery = query
+			break
+		}
+	}
+	require.NotEmpty(t, updateQuery)
+	query := normalizeSQLWhitespace(updateQuery)
+	require.Contains(t, query, "NOT ("+ollamaCloudBaseURLMatchesSQL("credentials ->> 'base_url'"))
+	require.Contains(t, query, ollamaCloudBaseURLMatchesSQL("$1::jsonb ->> 'base_url'"))
+	require.NotContains(t, query, "~*")
+	require.Contains(t, query, "platform IN ('openai', 'anthropic', 'kimi', 'zhipu', 'deepseek', 'minimax') AND type = 'apikey'")
+	require.Contains(t, query, "- 'ollama_cloud_usage_session' - 'ollama_cloud_usage_auto_refresh' - 'ollama_cloud_usage_snapshot'")
+	payload, ok := capturedPayload.([]byte)
+	require.True(t, ok)
+	require.NotContains(t, string(payload), service.OllamaCloudUsageSnapshotExtraKey)
 }
 
 func TestUpdateCredentialsIdentityChangeClearsAllOllamaManagedExtra(t *testing.T) {
@@ -334,10 +376,10 @@ func TestOllamaCloudUsagePlatformWhitelistMatchesServicePredicate(t *testing.T) 
 	for _, match := range matches {
 		sqlPlatforms[match[1]] = struct{}{}
 	}
-	require.Len(t, sqlPlatforms, 5)
+	require.Len(t, sqlPlatforms, 6)
 	for _, platform := range []string{
 		service.PlatformOpenAI, service.PlatformAnthropic,
-		service.PlatformKimi, service.PlatformZhipu, service.PlatformDeepseek,
+		service.PlatformKimi, service.PlatformZhipu, service.PlatformDeepseek, service.PlatformMiniMax,
 		service.PlatformGemini, service.PlatformGrok, service.PlatformAntigravity,
 		service.PlatformComposite, "kiro",
 	} {
@@ -384,7 +426,7 @@ func TestUpdateCredentialsPlainCNAPIKeyAccountCleanupStaysSemanticallyEquivalent
 	require.NoError(t, err)
 	query := normalizeSQLWhitespace(capturedSQL)
 	require.Contains(t, query,
-		"platform IN ('openai', 'anthropic', 'kimi', 'zhipu', 'deepseek') AND type = 'apikey' AND credentials IS DISTINCT FROM $1::jsonb")
+		"platform IN ('openai', 'anthropic', 'kimi', 'zhipu', 'deepseek', 'minimax') AND type = 'apikey' AND credentials IS DISTINCT FROM $1::jsonb")
 	require.Contains(t, query,
 		"THEN COALESCE(extra, '{}'::jsonb) - 'upstream_billing_probe' - 'ollama_cloud_usage_session' - 'ollama_cloud_usage_auto_refresh' - 'ollama_cloud_usage_snapshot'")
 	require.NotContains(t, query, "- 'upstream_billing_probe_enabled'")

@@ -40,4 +40,9 @@
 
 ## 验证记录
 
-最终测试结果、PR 地址和 Release 地址在提交完成后补充。
+- PR：`https://github.com/WangYa-Technology/sub2api/pull/14`（`dev` → `main`）。
+- Release：`https://github.com/WangYa-Technology/sub2api/releases/tag/v0.2.7-hcai`。
+- 前端 Vitest：306 个测试文件、2293 个测试全部通过。
+- 前端 lint、TypeScript 类型检查和生产构建全部通过。
+- `git diff --check` 通过。
+- Go 全量测试和编译在本机因 Go 工具进程长时间无输出、CPU 为 0 而终止；CI PR 将继续执行后端检查。

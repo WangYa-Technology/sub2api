@@ -44,6 +44,8 @@
           :to="{ path: '/model-plaza', query: { embedded: '1' } }"
           class="model-plaza-entry group hidden sm:flex"
           :class="{ 'model-plaza-entry-active': route.path === '/model-plaza' }"
+          :title="t('nav.modelPlaza')"
+          :aria-label="t('nav.modelPlaza')"
         >
           <span class="model-plaza-entry-icon" aria-hidden="true">
             <Icon name="grid" size="sm" :stroke-width="2" />
@@ -55,7 +57,7 @@
         <LocaleSwitcher />
 
         <!-- Subscription Progress (for users with active subscriptions) -->
-        <SubscriptionProgressMini v-if="user" />
+        <SubscriptionProgressMini v-if="user && subscriptionFeatureEnabled" />
 
         <!-- Balance Display -->
         <div
@@ -264,6 +266,8 @@ import AnnouncementBell from '@/components/common/AnnouncementBell.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { sanitizeUrl } from '@/utils/url'
 import { FeatureFlags, isFeatureFlagEnabled } from '@/utils/featureFlags'
+import { resolveRouteMetaKeys } from '@/router/title'
+import { resolveSiteBillingMode } from '@/utils/siteBillingMode'
 
 const router = useRouter()
 const route = useRoute()
@@ -312,6 +316,11 @@ const displayName = computed(() => {
   return user.value.username || user.value.email?.split('@')[0] || ''
 })
 
+const subscriptionFeatureEnabled = computed(() => isFeatureFlagEnabled(FeatureFlags.subscription))
+const routeMetaKeys = computed(() => resolveRouteMetaKeys(route, {
+  billingMode: resolveSiteBillingMode(appStore.cachedPublicSettings),
+}))
+
 const pageTitle = computed(() => {
   // For custom pages, use the menu item's label instead of generic "自定义页面"
   if (route.name === 'CustomPage') {
@@ -321,7 +330,7 @@ const pageTitle = computed(() => {
       ?? (authStore.isAdmin ? adminSettingsStore.customMenuItems.find((item) => item.id === id) : undefined)
     if (menuItem?.label) return menuItem.label
   }
-  const titleKey = route.meta.titleKey as string
+  const titleKey = routeMetaKeys.value.titleKey
   if (titleKey) {
     return t(titleKey)
   }
@@ -329,7 +338,7 @@ const pageTitle = computed(() => {
 })
 
 const pageDescription = computed(() => {
-  const descKey = route.meta.descriptionKey as string
+  const descKey = routeMetaKeys.value.descriptionKey
   if (descKey) {
     return t(descKey)
   }

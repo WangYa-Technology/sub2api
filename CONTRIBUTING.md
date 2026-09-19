@@ -13,6 +13,14 @@ Every pull request must describe the scope, tests, deployment impact, and rollba
 
 CI must be green before review. At least one CODEOWNER review is required. The author must resolve review comments; force-pushing is allowed only on the contributor branch, never on `dev` or `main`.
 
+## Documentation synchronization
+
+Development, fixes, upstream merges, reviews, CI diagnosis, releases, and deployments must keep the relevant documents in `docs/hcai-dev/` current. Follow the mapping and completion gate in [开发规范](docs/hcai-dev/开发规范.md).
+
+Include applicable documentation changes in the same task and PR. Record confirmed behavior, evidence, validation status, and unresolved risks; preserve historical baselines. New HCAI records use Chinese filenames under `docs/hcai-dev/`. Update links when paths change.
+
+Reviewers must verify documentation consistency before approval. If no update is needed, the PR or handoff must explain which documents were checked and why they are unaffected. Missing required updates blocks completion and merge readiness. This is a review requirement, not a currently automated CI check. Documentation updates do not authorize business-code fixes or remote actions during review-only tasks; explicit no-edit instructions still take precedence.
+
 ## Commits
 
 Use the repository convention:

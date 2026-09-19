@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - '**/*.md'
   workflow_dispatch:
 
 permissions:
@@ -14,7 +16,40 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  release-gate:
+    name: Check release version
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.version.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Skip already published versions
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(tr -d '\r\n' < backend/cmd/server/VERSION)"
+          if [[ -z "$VERSION" ]]; then
+            echo 'VERSION must not be empty' >&2
+            exit 1
+          fi
+          if git show-ref --verify --quiet "refs/tags/v${VERSION}"; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "Version v${VERSION} already exists; leaving its tag and assets unchanged." >> "$GITHUB_STEP_SUMMARY"
+          else
+            if [[ "$(backend/scripts/resolve-version.sh)" != "$VERSION" ]]; then
+              echo 'Resolved version differs from VERSION; refusing to publish' >&2
+              exit 1
+            fi
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
   build-release:
+    needs: release-gate
+    if: needs.release-gate.outputs.publish == 'true'
     name: Build linux amd64 deployment package
     runs-on: ubuntu-latest
 
@@ -122,8 +157,8 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -f "${{ steps.build.outputs.tag }}" "${GITHUB_SHA}"
-          git push -f origin "refs/tags/${{ steps.build.outputs.tag }}"
+          git tag "${{ steps.build.outputs.tag }}" "${GITHUB_SHA}"
+          git push origin "refs/tags/${{ steps.build.outputs.tag }}"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2

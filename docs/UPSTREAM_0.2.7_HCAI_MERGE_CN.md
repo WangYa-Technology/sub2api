@@ -45,4 +45,11 @@
 - 前端 Vitest：306 个测试文件、2293 个测试全部通过。
 - 前端 lint、TypeScript 类型检查和生产构建全部通过。
 - `git diff --check` 通过。
-- Go 全量测试和编译在本机因 Go 工具进程长时间无输出、CPU 为 0 而终止；CI PR 将继续执行后端检查。
+- 首轮本地 Go 验证因长时间无输出而终止；随后 PR CI 暴露了以下三处接口兼容遗漏。
+
+## 后端 CI 修复
+
+- `backend/cmd/server/wire_gen.go`：首轮合并遗漏限流服务的 `OllamaCloudUsageService` 参数。将 HTTP 客户端、Leader 锁及 Ollama 服务的初始化安排在限流服务之前，并注入同一个 Ollama 实例；保留 HCAI 配置、多节点锁和清理逻辑。
+- `backend/cmd/server/wire_gen.go`：补齐上游插件管理器新增的 `PluginKVStore` 依赖，通过现有 Redis 客户端创建并注入。
+- `backend/internal/handler/redeem_handler_test.go`：上游兑换历史测试补齐 HCAI `NewRedeemService` 的 `SettingRepository` 参数；该测试只查询历史，不访问设置，使用 `nil`。
+- 修复后本地 `go test -tags=unit ./...`、`go test ./...`、`CGO_ENABLED=0 go build ./cmd/server` 和 `git diff --check` 全部通过。

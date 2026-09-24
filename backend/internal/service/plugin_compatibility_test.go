@@ -54,6 +54,8 @@ func TestHCAIPluginVersionRanges(t *testing.T) {
 		compatible bool
 	}{
 		{"0.2.7-hcai", ">=0.2.7 <0.3.0", true},
+		{"0.2.8-hcai", ">=0.2.7 <0.3.0", true},
+		{"0.2.8-hcai", ">=0.2.8 <0.3.0", true},
 		{"v0.2.7-hcai.1", ">=0.2.7 <0.3.0", true},
 		{"0.2.7-hcai.12+build.1", "=0.2.7", true},
 		{"0.2.6-hcai.9", ">=0.2.7 <0.3.0", false},

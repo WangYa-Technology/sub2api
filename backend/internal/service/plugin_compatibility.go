@@ -88,7 +88,14 @@ func matchesSemverRange(version, expression string) bool {
 		if bound == "" {
 			return false
 		}
-		comparison := semver.Compare(v, bound)
+		// HCAI releases retain the upstream API baseline. Only plain upstream
+		// bounds use that baseline; explicit prerelease/HCAI bounds keep their
+		// original ordering. Tested-version declarations remain exact above.
+		candidate := v
+		if semver.Prerelease(bound) == "" {
+			candidate = pluginHostBaseline(v)
+		}
+		comparison := semver.Compare(candidate, bound)
 		matched := map[string]bool{
 			">=": comparison >= 0,
 			"<=": comparison <= 0,
@@ -101,4 +108,23 @@ func matchesSemverRange(version, expression string) bool {
 		}
 	}
 	return true
+}
+
+// pluginHostBaseline recognizes only published HCAI naming conventions:
+// X.Y.Z-hcai and X.Y.Z-hcai.N. Real prereleases must not be promoted.
+func pluginHostBaseline(version string) string {
+	pre := semver.Prerelease(version)
+	if pre != "-hcai" {
+		revision, ok := strings.CutPrefix(pre, "-hcai.")
+		if !ok || revision == "" {
+			return version
+		}
+		for _, digit := range revision {
+			if digit < '0' || digit > '9' {
+				return version
+			}
+		}
+	}
+	base, _, _ := strings.Cut(version, "-")
+	return base
 }

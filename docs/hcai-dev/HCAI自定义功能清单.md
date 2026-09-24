@@ -1,5 +1,7 @@
 # HCAI 自定义功能与内容清单
 
+> 0.2.8-hcai 新基线：本次保留全部 HCAI 定制，并新增上游 TypeSafe/OpenCode/推理强度计费/线下提现能力；详细冲突和验证见 [上游合并记录-0.2.8-hcai](上游合并记录-0.2.8-hcai.md)。旧版基线快照不回写。
+
 > 版本基线：`0.2.7-hcai`（当前 `dev` 分支，提交 `9345eab94`；`main` 合并提交 `4a118044`）。
 >
 > 本文档用于回答“哪些内容是 HCAI 自定义、如何生效、在哪里维护、与上游有什么边界”。盘点依据为当前代码、数据库迁移、前端静态资源、测试、HCAI 提交历史以及 v0.2.7 合并记录。上游同步后仍保留在 HCAI 分支中的能力也单独标注，避免把所有上游功能误认为 HCAI 原创。
@@ -133,6 +135,12 @@ HCAI 特殊规则：
 相关测试：`frontend/src/components/modelPlaza/__tests__/PlazaModelPricingTable.spec.ts`、`PlazaGroupSection.spec.ts`、`backend/internal/service/model_pricing_resolver_test.go`、`setting_model_plaza_test.go`。
 
 ## 5. 插件平台与插件管理
+
+### 2026-09-20 修订：0.2.7-hcai.1 宿主兼容基线
+
+插件普通版本范围按 HCAI 对应上游基线校验：仅 `X.Y.Z-hcai` 和 `X.Y.Z-hcai.N`（N 为合法数字修订号）映射为 `X.Y.Z`。显式包含预发布/HCAI 后缀的约束仍按原始版本比较；rc、beta 及未知后缀不升级为正式版。协议版本检查不变，对外显示完整 HCAI 版本。
+
+插件声明仅测试过上游版本时，HCAI 版本仍标记为“范围兼容、未经声明测试”，不能冒充已测试；管理员确认机制保留。实现和边界测试位于 `plugin_compatibility.go`、`plugin_compatibility_test.go`。详见 [修复与部署记录](插件兼容性修复与部署-0.2.7-hcai.1.md)。本段为新增修订，非旧版历史行为。
 
 ### 5.1 开关持久化
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  CC_SWITCH_USAGE_SCRIPT,
   GROK_CC_SWITCH_MODEL,
   OPENAI_CC_SWITCH_CODEX_MODEL,
   buildCcSwitchImportDeeplink
@@ -27,28 +28,12 @@ describe('ccswitchImport utils', () => {
     usageScript: 'return true'
   }
 
-  it('adds the Codex model parameter for OpenAI imports', () => {
-    const params = paramsFromDeeplink(
-      buildCcSwitchImportDeeplink({
-        ...baseInput,
-        platform: 'openai',
-        clientType: 'claude'
-      })
-    )
-
-    expect(params.get('resource')).toBe('provider')
-    expect(params.get('app')).toBe('codex')
-    expect(params.get('endpoint')).toBe(`${baseInput.baseUrl}/v1`)
-    expect(params.get('model')).toBe(OPENAI_CC_SWITCH_CODEX_MODEL)
-    expect(atob(params.get('usageScript') || '')).toBe(baseInput.usageScript)
-  })
-
   it.each([
-    'https://api.example.com',
-    'https://api.example.com/',
-    'https://api.example.com/v1',
-    'https://api.example.com/v1/'
-  ])('imports Codex with exactly one /v1 suffix for base URL %s', (baseUrl) => {
+    ['https://api.example.com', 'https://api.example.com'],
+    ['https://api.example.com/', 'https://api.example.com'],
+    ['https://api.example.com/v1', 'https://api.example.com/v1'],
+    ['https://api.example.com/v1/', 'https://api.example.com/v1']
+  ])('keeps Codex imports on the configured endpoint for base URL %s', (baseUrl, endpoint) => {
     const params = paramsFromDeeplink(
       buildCcSwitchImportDeeplink({
         ...baseInput,
@@ -58,7 +43,11 @@ describe('ccswitchImport utils', () => {
       })
     )
 
-    expect(params.get('endpoint')).toBe('https://api.example.com/v1')
+    expect(params.get('resource')).toBe('provider')
+    expect(params.get('app')).toBe('codex')
+    expect(params.get('endpoint')).toBe(endpoint)
+    expect(params.get('model')).toBe(OPENAI_CC_SWITCH_CODEX_MODEL)
+    expect(atob(params.get('usageScript') || '')).toBe(baseInput.usageScript)
   })
 
   it.each([
@@ -132,5 +121,88 @@ describe('ccswitchImport utils', () => {
     // eslint-disable-next-line no-new-func
     const fn = new Function('return (' + decoded + ')') as () => (r: unknown) => { planName: string }
     expect(fn()({}).planName).toBe('订阅')
+  })
+})
+
+describe('CC Switch usage script', () => {
+  function extractUsage(response: unknown): Record<string, unknown> {
+    const params = paramsFromDeeplink(buildCcSwitchImportDeeplink({
+      baseUrl: 'https://api.example.com', platform: 'openai', clientType: 'claude',
+      providerName: 'HCAI', apiKey: 'sk-test', usageScript: CC_SWITCH_USAGE_SCRIPT
+    }))
+    // Evaluate the actual ASCII-safe payload received by CC Switch.
+    // eslint-disable-next-line no-new-func
+    const config = new Function(`return ${atob(params.get('usageScript')!)}`)() as {
+      extractor: (value: unknown) => Record<string, unknown>
+    }
+    return config.extractor(response)
+  }
+
+  it('preserves subscription windows and zero usage in the selected window', () => {
+    expect(extractUsage({ remaining: 20, planName: 'Pro', subscription: {
+      daily_usage_usd: 2, daily_limit_usd: 10,
+      weekly_usage_usd: 5, weekly_limit_usd: 20,
+      monthly_usage_usd: 0, monthly_limit_usd: 100
+    } })).toMatchObject({ isValid: true, planName: 'Pro', used: 0, total: 100,
+      remaining: 20, extra: '日 20% · 周 25% · 月 0%' })
+    expect(extractUsage({ remaining: -1, subscription: {} })).toMatchObject({
+      remaining: null, used: null, total: null, extra: '无限制'
+    })
+  })
+
+  it('preserves quota and chooses the most-used rate window', () => {
+    expect(extractUsage({ quota: { used: 25, limit: 100, remaining: 75 } })).toMatchObject({
+      planName: 'API Key 配额', used: 25, total: 100, remaining: 75, extra: '25%'
+    })
+    expect(extractUsage({ rate_limits: [
+      { window: '5h', used: 10, limit: 100, remaining: 90 },
+      { window: '7d', used: 80, limit: 100, remaining: 20 }
+    ] })).toMatchObject({ planName: '速率限制', used: 80, total: 100, remaining: 20,
+      extra: '5h 10% · 7d 80%' })
+  })
+
+  it('preserves balance usage and rejects inactive or failed responses', () => {
+    expect(extractUsage({ balance: 30, usage: { total: { cost: 12 } } })).toMatchObject({
+      isValid: true, planName: '钱包余额', remaining: 30, total: 30, used: 12, unit: 'USD'
+    })
+    expect(extractUsage({ error: { message: 'expired' } })).toEqual({
+      isValid: false, invalidMessage: 'expired'
+    })
+    for (const response of [null, { is_active: false }, { isValid: false }]) {
+      expect(extractUsage(response).isValid).toBe(false)
+    }
+  })
+
+  // Mirrors CC Switch: substitute the template vars as text, evaluate, read request.url.
+  function usageUrlFor(baseUrl: string): string {
+    const script = CC_SWITCH_USAGE_SCRIPT.split('{{baseUrl}}').join(baseUrl).split('{{apiKey}}').join('sk-test')
+    // eslint-disable-next-line no-new-func
+    const config = new Function(`return ${script}`)() as { request: { url: string } }
+    return config.request.url
+  }
+
+  it.each([
+    'https://api.example.com',
+    'https://api.example.com/',
+    'https://api.example.com/v1',
+    'https://api.example.com/v1/'
+  ])('queries exactly one /v1/usage for base URL %s', (baseUrl) => {
+    expect(usageUrlFor(baseUrl)).toBe('https://api.example.com/v1/usage')
+  })
+
+  it('works against the endpoint every platform import stores', () => {
+    for (const platform of ['anthropic', 'openai', 'grok', 'gemini'] as GroupPlatform[]) {
+      const endpoint = paramsFromDeeplink(
+        buildCcSwitchImportDeeplink({
+          baseUrl: 'https://api.example.com',
+          platform,
+          clientType: platform === 'gemini' ? 'gemini' : 'claude',
+          providerName: 'Sub2API',
+          apiKey: 'sk-test',
+          usageScript: CC_SWITCH_USAGE_SCRIPT
+        })
+      ).get('endpoint') as string
+      expect(usageUrlFor(endpoint)).toBe('https://api.example.com/v1/usage')
+    }
   })
 })

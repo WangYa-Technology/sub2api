@@ -25,6 +25,10 @@ function withV1Endpoint(baseUrl: string): string {
   return normalizedBaseUrl.endsWith('/v1') ? normalizedBaseUrl : `${normalizedBaseUrl}/v1`
 }
 
+function withoutTrailingSlashes(baseUrl: string): string {
+  return baseUrl.replace(/\/+$/, '')
+}
+
 /**
  * 将脚本以 ASCII 安全的方式 base64 编码。
  *

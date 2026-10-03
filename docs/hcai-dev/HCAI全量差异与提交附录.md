@@ -1,5 +1,14 @@
 # HCAI 全量差异和提交附录
 
+## 0.2.13-hcai 增量快照
+
+本次基线为 HCAI `bfbaa9dc535aa1b28bbc362bf96feb6c56189f12`，上游为 `v0.2.13`（源码提交 `7d0c0067f406c380f0a94cfc3879cdae7049b467`）。本节只记录本轮增量，不改写 0.2.8 历史快照。
+
+- 上游接入 TypeSafe/System One、Claude Reset Credit、充值赠送阶梯、API key 创建限制、billing deleted-key 修复及网关兼容测试。
+- HCAI 保留首页/loading、插件管理、模型广场渠道价格优先、双语 locale、CC Switch、中文 README、外链安全、多区域任务和发布保护。
+- 两个 `241_*.sql` 文件名不同，迁移器以完整文件名作为记录键；需 staging 复核顺序、校验和与回滚窗口。
+- 逐文件冲突、解决方案和验证证据见 [上游合并记录-0.2.13-hcai](上游合并记录-0.2.13-hcai.md)。
+
 ## 0.2.8-hcai 差异快照
 
 本节是基于上游 `fd80b08c90b55edcad5b00171b53f08721d30da1` 的新增记录，独立于下方 v0.2.7 历史快照。保留的净定制包括 HCAI 首页/loading、模型广场渠道价优先与中英文 locale、插件管理和兼容范围、外链安全、多区域任务资格/租约、内容审核多端点、支付返利、CC Switch、异步图片/MinIO、WeCom、发布保护及自定义 README。上游新增的 TypeSafe 引擎、OpenCode Go 用量、Claude 版本同步、推理强度倍率和线下提现在 HCAI 版本中接入，但不改变上述边界。

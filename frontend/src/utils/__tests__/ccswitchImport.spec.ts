@@ -29,8 +29,8 @@ describe('ccswitchImport utils', () => {
   }
 
   it.each([
-    ['https://api.example.com', 'https://api.example.com'],
-    ['https://api.example.com/', 'https://api.example.com'],
+    ['https://api.example.com', 'https://api.example.com/v1'],
+    ['https://api.example.com/', 'https://api.example.com/v1'],
     ['https://api.example.com/v1', 'https://api.example.com/v1'],
     ['https://api.example.com/v1/', 'https://api.example.com/v1']
   ])('keeps Codex imports on the configured endpoint for base URL %s', (baseUrl, endpoint) => {

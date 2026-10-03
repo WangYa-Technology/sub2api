@@ -92,17 +92,18 @@ func TestRiskControlAllowlistAuditsWithoutLocalPenalties(t *testing.T) {
 			require.NoError(t, err)
 			require.True(t, decision.Allowed)
 			require.False(t, decision.Blocked)
-			var task contentModerationTask
+			// Keyword blocks and flagged pre-block results are persisted synchronously;
+			// hash/observe paths still enqueue work for the worker. Drain the queue only
+			// when this invocation actually produced an asynchronous task.
 			select {
-			case task = <-svc.asyncQueue:
-			case <-time.After(time.Second):
-				t.Fatal("expected an audit task")
-			}
-			if task.log != nil {
-				svc.persistContentModerationLog(context.Background(), task.config, task.log, task.inputHash, task.recordHash, task.applySideEffects)
-			} else {
-				delay := 1
-				svc.checkSync(context.Background(), task.input, svc.runtimeSnapshot.Load().config, task.content, task.inputHash, &delay, false)
+			case task := <-svc.asyncQueue:
+				if task.log != nil {
+					svc.persistContentModerationLog(context.Background(), task.config, task.log, task.inputHash, task.recordHash, task.applySideEffects)
+				} else {
+					delay := 1
+					svc.checkSync(context.Background(), task.input, svc.runtimeSnapshot.Load().config, task.content, task.inputHash, &delay, false)
+				}
+			default:
 			}
 			logs := repo.snapshotLogs()
 			require.Len(t, logs, 1)

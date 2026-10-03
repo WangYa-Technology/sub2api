@@ -1,5 +1,7 @@
 # HCAI 自定义功能与内容清单
 
+> 0.2.13-hcai 同步说明：本次继续以 HCAI 定制为优先，新增上游 TypeSafe/System One、Claude Reset Credit、充值赠送阶梯和 API key 创建限制等能力；冲突逐项记录见 [上游合并记录-0.2.13-hcai](上游合并记录-0.2.13-hcai.md)。
+
 > 0.2.8-hcai 新基线：本次保留全部 HCAI 定制，并新增上游 TypeSafe/OpenCode/推理强度计费/线下提现能力；详细冲突和验证见 [上游合并记录-0.2.8-hcai](上游合并记录-0.2.8-hcai.md)。旧版基线快照不回写。
 
 > 版本基线：`0.2.7-hcai`（当前 `dev` 分支，提交 `9345eab94`；`main` 合并提交 `4a118044`）。

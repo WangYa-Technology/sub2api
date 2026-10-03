@@ -1048,6 +1048,7 @@ export default {
         zhipu: 'Zhipu GLM',
         deepseek: 'DeepSeek',
         minimax: 'MiniMax',
+        typesafe: 'TypeSafe / Jev',
         composite: 'Composite',
       },
       deleteConfirm:

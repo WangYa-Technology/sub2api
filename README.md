@@ -9,7 +9,7 @@
 ## 版本与仓库
 
 - 本仓库：[`WangYa-Technology/sub2api`](https://github.com/WangYa-Technology/sub2api)。
-- 当前源码版本：`0.2.17-hcai`，以 [VERSION](backend/cmd/server/VERSION) 为准。
+- 当前源码版本：`0.2.18-hcai`，以 [VERSION](backend/cmd/server/VERSION) 为准。
 - `dev`：开发和上游同步；`main`：通过 PR 合并的发布分支。
 - HCAI 发布版本使用 `-hcai` 后缀。上游同数字版本不是 HCAI 发行包，不能直接替换。
 

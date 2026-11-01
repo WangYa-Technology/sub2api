@@ -309,6 +309,79 @@ func TestListPlazaGroups_GroupImagePriceOverridesChannelPricing(t *testing.T) {
 	require.Len(t, channels[0].ModelPricing[0].Intervals, 1)
 }
 
+func TestListPlazaGroups_GroupModelImagePricingWinsOverGroupImageTiers(t *testing.T) {
+	groupImage1K, groupImage2K, groupImage4K := 0.05, 0.055, 0.06
+	model1K, model2K, model4K := 0.05, 0.075, 0.1
+	channels := []Channel{{
+		ID: 1, Name: "img-ch", Status: StatusActive, GroupIDs: []int64{10},
+		ModelPricing: []ChannelModelPricing{{
+			Platform:        "openai",
+			Models:          []string{"yeahzi-image"},
+			BillingMode:     BillingModeImage,
+			PerRequestPrice: testPtrFloat64(0.2),
+		}},
+	}}
+	groups := []Group{{
+		ID: 10, Name: "g", Platform: "openai", RateMultiplier: 1,
+		ImagePrice1K: &groupImage1K, ImagePrice2K: &groupImage2K, ImagePrice4K: &groupImage4K,
+		ModelPricing: []ChannelModelPricing{{
+			Platform:        "openai",
+			Models:          []string{"yeahzi-image"},
+			BillingMode:     BillingModeImage,
+			PerRequestPrice: testPtrFloat64(0.1),
+			Intervals: []PricingInterval{
+				{TierLabel: "1K", PerRequestPrice: &model1K},
+				{TierLabel: "2K", PerRequestPrice: &model2K},
+				{TierLabel: "4K", PerRequestPrice: &model4K},
+			},
+		}},
+	}}
+
+	out, err := newPlazaService(channels, groups, nil).ListGroups(context.Background())
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	require.Len(t, out[0].Models, 1)
+	p := out[0].Models[0].Pricing
+	require.Equal(t, BillingModeImage, p.BillingMode)
+	require.Len(t, p.Intervals, 3)
+	tierPrices := map[string]float64{}
+	for _, iv := range p.Intervals {
+		require.NotNil(t, iv.PerRequestPrice)
+		tierPrices[iv.TierLabel] = *iv.PerRequestPrice
+	}
+	require.InDelta(t, 0.05, tierPrices["1K"], 1e-9)
+	require.InDelta(t, 0.075, tierPrices["2K"], 1e-9)
+	require.InDelta(t, 0.1, tierPrices["4K"], 1e-9)
+}
+
+func TestListPlazaGroups_GroupModelFlatImagePriceWinsOverGroupImageTiers(t *testing.T) {
+	groupPrice := 0.2
+	channels := []Channel{{
+		ID: 1, Name: "img-ch", Status: StatusActive, GroupIDs: []int64{10},
+		ModelPricing: []ChannelModelPricing{{
+			Platform: "openai", Models: []string{"gemini-3.1-flash-lite-image"},
+			BillingMode: BillingModeImage, PerRequestPrice: testPtrFloat64(0.2),
+		}},
+	}}
+	groups := []Group{{
+		ID: 10, Name: "g", Platform: "openai", RateMultiplier: 1,
+		ImagePrice1K: &groupPrice,
+		ModelPricing: []ChannelModelPricing{{
+			Platform: "openai", Models: []string{"gemini-3.1-flash-lite-image"},
+			BillingMode: BillingModeImage, PerRequestPrice: testPtrFloat64(0.1),
+		}},
+	}}
+
+	out, err := newPlazaService(channels, groups, nil).ListGroups(context.Background())
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	p := out[0].Models[0].Pricing
+	require.Equal(t, BillingModeImage, p.BillingMode)
+	require.NotNil(t, p.PerRequestPrice)
+	require.InDelta(t, 0.1, *p.PerRequestPrice, 1e-9)
+	require.Empty(t, p.Intervals, "模型级固定价不应被分组图片档位覆盖")
+}
+
 func TestListPlazaGroups_GroupImagePriceIgnoredForNonImageModes(t *testing.T) {
 	// token 模式定价不受分组图片价影响。
 	imgPrice := 0.02
@@ -446,6 +519,29 @@ func TestListGroups_ChannelTokenPricingOverridesGroupCard(t *testing.T) {
 	require.InDelta(t, 3e-6, *m.Pricing.InputPrice, 1e-15, "渠道输入价覆盖分组价卡")
 	require.InDelta(t, 15e-6, *m.Pricing.OutputPrice, 1e-15, "渠道未配置输出价时回落目录价")
 	require.Empty(t, m.Pricing.Intervals)
+}
+
+func TestListGroups_ChannelTokenPricingOverridesGroupFixedCard(t *testing.T) {
+	for _, mode := range []BillingMode{BillingModeImage, BillingModePerRequest} {
+		t.Run(string(mode), func(t *testing.T) {
+			channels := []Channel{plazaPricedChannel(1, "ch", []int64{10}, PlatformAnthropic, "claude-sonnet-4")}
+			groups := []Group{{
+				ID: 10, Name: "g", Platform: PlatformAnthropic, RateMultiplier: 1,
+				ImagePrice1K: testPtrFloat64(0.02),
+				ModelPricing: []ChannelModelPricing{{Models: []string{"claude-sonnet-*"}, BillingMode: mode, PerRequestPrice: testPtrFloat64(0.1)}},
+			}}
+			svc := newPlazaServiceWithBilling(channels, groups, map[int64]string{10: PlatformAnthropic}, nil)
+			out, err := svc.ListGroups(context.Background())
+			require.NoError(t, err)
+			require.Len(t, out, 1)
+			p := out[0].Models[0].Pricing
+			require.Equal(t, BillingModeToken, p.BillingMode)
+			require.InDelta(t, 3e-6, *p.InputPrice, 1e-15)
+			// 展示优先不应改变实际扣费的分组固定价优先级。
+			actual := svc.resolver.Resolve(context.Background(), PricingInput{Model: "claude-sonnet-4", Group: &groups[0], GroupID: &groups[0].ID})
+			require.Equal(t, mode, actual.Mode)
+		})
+	}
 }
 
 func TestListGroups_ImageModelKeepsTierSynthesisWithBilling(t *testing.T) {

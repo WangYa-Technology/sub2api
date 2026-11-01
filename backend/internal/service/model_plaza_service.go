@@ -231,7 +231,8 @@ func (s *ModelPlazaService) ListGroups(ctx context.Context) ([]PlazaGroup, error
 // token 模型取计费阶梯表（单价与档位均由真实计费函数得出），
 // 图片/按次模型（或阶梯表不可用时）沿用渠道定价与分组图片档位价。
 func (s *ModelPlazaService) fillDisplayPricing(ctx context.Context, m *PlazaModel, g *Group) {
-	if groupPricing := matchGroupModelPricing(g, m.Name); groupPricing != nil {
+	groupPricing := matchGroupModelPricing(g, m.Name)
+	if groupPricing != nil {
 		m.Pricing = groupPricing
 	}
 	if s.billingService != nil && s.resolver != nil {
@@ -249,6 +250,11 @@ func (s *ModelPlazaService) fillDisplayPricing(ctx context.Context, m *PlazaMode
 			m.TimePricing = sched.TimePricing
 			return
 		}
+	}
+	// 保留 HCAI 渠道 token 展示优先；未生成 token 阶梯时，分组模型固定价
+	// 不能再被通用图片档位覆盖。此处仅调整展示，不改变实际扣费优先级。
+	if groupPricing != nil && (groupPricing.BillingMode == BillingModeImage || groupPricing.BillingMode == BillingModePerRequest) {
+		return
 	}
 	m.Pricing = plazaImageDisplayPricing(m.Pricing, g)
 }

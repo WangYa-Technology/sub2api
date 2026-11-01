@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -634,6 +635,10 @@ func TestOpenCodeGoUsageSetAutoRefreshAndSnapshotAreGroupScoped(t *testing.T) {
 }
 
 func TestOpenCodeGoUsageRefreshSingleflightAndRunnerDeduplicateSharedGroup(t *testing.T) {
+	synctest.Test(t, testOpenCodeGoUsageRefreshSingleflightAndRunnerDeduplicateSharedGroup)
+}
+
+func testOpenCodeGoUsageRefreshSingleflightAndRunnerDeduplicateSharedGroup(t *testing.T) {
 	first := openCodeGoUsageAccount(91)
 	first.Credentials["api_key"] = "shared-key"
 	first.Extra[OpenCodeGoUsageAutoRefreshExtraKey] = true
@@ -659,15 +664,10 @@ func TestOpenCodeGoUsageRefreshSingleflightAndRunnerDeduplicateSharedGroup(t *te
 	errs := make(chan error, 2)
 	go func() { _, err := svc.Refresh(context.Background(), first.ID); errs <- err }()
 	<-started
-	// The first caller is now parked in the stub, having loaded the account twice
-	// (once to build the group key, once inside the singleflight function).
-	loadsBeforeSecond := repo.getByIDCalls.Load()
 	go func() { _, err := svc.Refresh(context.Background(), second.ID); errs <- err }()
-	// Only release the first caller once the second one has loaded its own
-	// account, which happens immediately before it joins the singleflight group.
-	require.Eventually(t, func() bool {
-		return repo.getByIDCalls.Load() > loadsBeforeSecond
-	}, 5*time.Second, time.Millisecond, "the second caller must reach the singleflight group before the first is released")
+	// A repository read does not prove the second caller joined singleflight.
+	// Wait until both goroutines are durably blocked before releasing upstream.
+	synctest.Wait()
 	close(release)
 	require.NoError(t, <-errs)
 	require.NoError(t, <-errs)

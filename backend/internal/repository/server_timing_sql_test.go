@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/servertiming"
@@ -150,6 +151,10 @@ func metricDuration(t *testing.T, header, metric string) float64 {
 }
 
 func TestServerTimingConnectorRecordsDriverCallsWithoutRowLifetime(t *testing.T) {
+	synctest.Test(t, testServerTimingConnectorRecordsDriverCallsWithoutRowLifetime)
+}
+
+func testServerTimingConnectorRecordsDriverCallsWithoutRowLifetime(t *testing.T) {
 	startedAt := time.Now()
 	collector := servertiming.New(startedAt)
 	ctx := servertiming.WithCollector(context.Background(), collector)

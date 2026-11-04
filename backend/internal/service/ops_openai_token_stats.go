@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"math"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
@@ -51,5 +52,8 @@ func (s *OpsService) GetOpenAITokenStats(ctx context.Context, filter *OpsOpenAIT
 		}
 	}
 
-	return s.opsRepo.GetOpenAITokenStats(ctx, filter)
+	if filter.TopN <= 0 && filter.Page > math.MaxInt/filter.PageSize {
+		return nil, infraerrors.BadRequest("OPS_PAGE_INVALID", "page offset is too large")
+	}
+	return s.getCachedTokenStats(ctx, filter)
 }

@@ -101,8 +101,10 @@ func TestParseOpsOpenAITokenStatsFilter_Defaults(t *testing.T) {
 	require.Nil(t, filter.GroupID)
 	require.Equal(t, "", filter.Platform)
 	require.True(t, filter.StartTime.Before(filter.EndTime))
-	require.WithinDuration(t, before.Add(-30*24*time.Hour), filter.StartTime, 2*time.Second)
-	require.WithinDuration(t, after, filter.EndTime, 2*time.Second)
+	require.False(t, filter.EndTime.Before(before.Truncate(time.Minute)))
+	require.False(t, filter.EndTime.After(after.Truncate(time.Minute)))
+	require.Equal(t, filter.EndTime.Truncate(time.Minute), filter.EndTime)
+	require.Equal(t, 30*24*time.Hour, filter.EndTime.Sub(filter.StartTime))
 }
 
 func TestParseOpsOpenAITokenStatsFilter_WithTopN(t *testing.T) {

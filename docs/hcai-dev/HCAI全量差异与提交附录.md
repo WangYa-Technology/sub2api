@@ -494,3 +494,11 @@ d3c656fb8 hcai: prevent grouped sidebar items from rendering as standalone links
 8fa35fc52 hcai: add records of turnover-based rebates for redemption codes
 7a0c2e022 hcai: add redeem code sale price rebate support and hcai frontend
 ```
+
+## 2026-11-04 增量记录：Token 请求统计（未发布）
+
+此节独立于历史差异快照；工作基线 `382bc8626`，本次没有重新生成全量基线。新增/修改范围为 Token stats repository/service/cache/test、admin handler 时间桶/test、OpsService Redis/singleflight 字段与 Wire 接线、运维高级设置默认值/test、前端 ops API/仪表盘/Token 卡与测试、中英文截至时间文案。没有改 usage_logs 索引、统计指标或生产数据。文档证据见 [排查与优化记录](Token请求统计高IO排查与优化-2026-11-04.md)、[本地计划](Token请求统计本地执行计划-2026-11-04.txt)、[生产只读检查](Token请求统计生产只读检查-2026-11-04.sql)。生产实际基线与共享 Redis 条件需上线前核实，不能以该工作区的旧 VERSION 直接覆盖 0.2.19。
+
+### 2026-11-04 后续差异：Token 统计数据库缓存
+
+在同一工作基线上替换首轮 Redis 实现：新增 `249_ops_token_stats_cache.sql`、repository 缓存/事务锁和跨连接池 PostgreSQL 集成测试；service 仅保留 key 与 singleflight，移除 Redis 字段及 provider/Wire 依赖改动。查询表达式和前端方案保持不变。新增 [数据库缓存实现记录](Token请求统计数据库缓存实现-2026-11-04.md)；不改写历史基线，未部署。

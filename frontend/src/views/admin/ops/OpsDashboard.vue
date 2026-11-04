@@ -395,7 +395,7 @@ applyRouteQueryToState()
 const showAlertEvents = ref(true)
 const showOpenAITokenStats = ref(false)
 const autoRefreshEnabled = ref(false)
-const autoRefreshIntervalMs = ref(30000) // default 30 seconds
+const autoRefreshIntervalMs = ref(60000) // default 60 seconds
 const autoRefreshCountdown = ref(0)
 
 // Used to trigger child component refreshes in a single shared cadence.
@@ -404,13 +404,14 @@ const dashboardRefreshToken = ref(0)
 // Countdown timer (drives auto refresh; updates every second)
 const { pause: pauseCountdown, resume: resumeCountdown } = useIntervalFn(
   () => {
+    if (document.hidden) return
     if (!autoRefreshEnabled.value) return
     if (!opsEnabled.value) return
     if (loading.value) return
 
     if (autoRefreshCountdown.value <= 0) {
-      // Fetch immediately when the countdown reaches 0.
-      // fetchData() will reset the countdown to the full interval.
+      // Reset before starting: failed requests must not retry every second.
+      autoRefreshCountdown.value = Math.floor(autoRefreshIntervalMs.value / 1000)
       fetchData()
       return
     }
@@ -435,7 +436,7 @@ async function loadDashboardAdvancedSettings() {
     showAlertEvents.value = true
     showOpenAITokenStats.value = false
     autoRefreshEnabled.value = false
-    autoRefreshIntervalMs.value = 30000
+    autoRefreshIntervalMs.value = 60000
     autoRefreshCountdown.value = 0
   }
 }
@@ -733,16 +734,17 @@ async function fetchData() {
   abortDashboardFetch()
   dashboardFetchSeq += 1
   const fetchSeq = dashboardFetchSeq
-  dashboardFetchController = new AbortController()
+  const controller = new AbortController()
+  dashboardFetchController = controller
 
   loading.value = true
   errorMessage.value = ''
   try {
     await Promise.all([
-      refreshCoreSnapshotWithCancel(fetchSeq, dashboardFetchController.signal),
-      refreshSwitchTrendWithCancel(fetchSeq, dashboardFetchController.signal),
+      refreshCoreSnapshotWithCancel(fetchSeq, controller.signal),
+      refreshSwitchTrendWithCancel(fetchSeq, controller.signal),
     ])
-    if (fetchSeq !== dashboardFetchSeq) return
+    if (fetchSeq !== dashboardFetchSeq || controller.signal.aborted) return
 
     lastUpdated.value = new Date()
 
@@ -755,8 +757,9 @@ async function fetchData() {
     }
 
     // Defer non-core visual panels to reduce initial blocking.
-    void refreshDeferredPanels(fetchSeq, dashboardFetchController.signal)
+    void refreshDeferredPanels(fetchSeq, controller.signal)
   } catch (err) {
+    if (fetchSeq !== dashboardFetchSeq || controller.signal.aborted || isCanceledRequest(err)) return
     if (!isOpsDisabledError(err)) {
       console.error('[ops] failed to fetch dashboard data', err)
       errorMessage.value = t('admin.ops.failedToLoadData')
@@ -803,7 +806,18 @@ watch(
   }
 )
 
+function handleDashboardVisibilityChange() {
+  autoRefreshCountdown.value = Math.floor(autoRefreshIntervalMs.value / 1000)
+  if (document.hidden) {
+    pauseCountdown()
+    abortDashboardFetch()
+  } else if (autoRefreshEnabled.value) {
+    resumeCountdown()
+  }
+}
+
 onMounted(async () => {
+  document.addEventListener('visibilitychange', handleDashboardVisibilityChange)
   // Fullscreen mode: listen for ESC key
   window.addEventListener('keydown', handleKeydown)
 
@@ -840,6 +854,7 @@ async function loadThresholds() {
 }
 
 onUnmounted(() => {
+  document.removeEventListener('visibilitychange', handleDashboardVisibilityChange)
   window.removeEventListener('keydown', handleKeydown)
   abortDashboardFetch()
   pauseCountdown()

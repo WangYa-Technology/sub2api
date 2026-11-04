@@ -181,3 +181,20 @@ func TestSetOpenAIQuotaAutoPauseSettings_VisibleImmediately(t *testing.T) {
 		t.Fatalf("after Set, Get = %+v, want {0.88, 0.77}", got)
 	}
 }
+
+func TestOpsRefreshDefaultAndPersistedInterval(t *testing.T) {
+	cfg := defaultOpsAdvancedSettings()
+	if cfg.AutoRefreshIntervalSec != 60 {
+		t.Fatalf("default interval = %d", cfg.AutoRefreshIntervalSec)
+	}
+	cfg.AutoRefreshIntervalSec = 30
+	normalizeOpsAdvancedSettings(cfg)
+	if cfg.AutoRefreshIntervalSec != 30 {
+		t.Fatal("must preserve administrator's stored interval")
+	}
+	cfg.AutoRefreshIntervalSec = 0
+	normalizeOpsAdvancedSettings(cfg)
+	if cfg.AutoRefreshIntervalSec != 60 {
+		t.Fatal("missing interval must default to 60")
+	}
+}

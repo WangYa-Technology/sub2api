@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { defineComponent } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import OpsOpenAITokenStatsCard from '../OpsOpenAITokenStatsCard.vue'
@@ -71,8 +71,73 @@ const sampleResponse = {
 }
 
 describe('OpsOpenAITokenStatsCard', () => {
+  afterEach(() => { vi.restoreAllMocks() })
+
   beforeEach(() => {
     vi.clearAllMocks()
+  })
+
+  function mountCard() {
+    return mount(OpsOpenAITokenStatsCard, {
+      props: { refreshToken: 0 },
+      global: { stubs: { Select: SelectStub, EmptyState: EmptyStateStub } }
+    })
+  }
+
+  it('定时信号不重叠，筛选取消旧请求且旧响应不能覆盖新筛选', async () => {
+    let resolveOld!: (value: typeof sampleResponse) => void
+    mockGetOpenAITokenStats.mockReturnValueOnce(new Promise(resolve => { resolveOld = resolve }))
+    const wrapper = mountCard()
+    const oldSignal = mockGetOpenAITokenStats.mock.calls[0][1].signal as AbortSignal
+    await wrapper.setProps({ refreshToken: 1 })
+    expect(mockGetOpenAITokenStats).toHaveBeenCalledTimes(1)
+    mockGetOpenAITokenStats.mockResolvedValue({ ...sampleResponse, items: [{ ...sampleResponse.items[0], model: 'fresh-model' }] })
+    await wrapper.findAllComponents(SelectStub)[0].vm.$emit('update:modelValue', '1h')
+    await flushPromises()
+    expect(oldSignal.aborted).toBe(true)
+    expect(mockGetOpenAITokenStats).toHaveBeenCalledTimes(2)
+    resolveOld(sampleResponse)
+    await flushPromises()
+    expect(wrapper.text()).toContain('fresh-model')
+    expect(wrapper.text()).not.toContain('gpt-4o-mini')
+    wrapper.unmount()
+  })
+
+  it('隐藏时取消并跳过刷新，恢复不补发，卸载取消当前请求', async () => {
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    mockGetOpenAITokenStats.mockImplementation(() => new Promise(() => {}))
+    const wrapper = mountCard()
+    const first = mockGetOpenAITokenStats.mock.calls[0][1].signal as AbortSignal
+    hidden.mockReturnValue(true)
+    document.dispatchEvent(new Event('visibilitychange'))
+    expect(first.aborted).toBe(true)
+    await wrapper.setProps({ refreshToken: 1 })
+    expect(mockGetOpenAITokenStats).toHaveBeenCalledTimes(1)
+    hidden.mockReturnValue(false)
+    document.dispatchEvent(new Event('visibilitychange'))
+    await flushPromises()
+    expect(mockGetOpenAITokenStats).toHaveBeenCalledTimes(1)
+    await wrapper.setProps({ refreshToken: 2 })
+    const last = mockGetOpenAITokenStats.mock.calls[1][1].signal as AbortSignal
+    wrapper.unmount()
+    expect(last.aborted).toBe(true)
+  })
+
+  it('越界分页仅由 watcher 纠正一次，空页总数仍保留', async () => {
+    mockGetOpenAITokenStats.mockImplementation(async (params: Record<string, any>) => ({
+      ...sampleResponse, total: params.page === 2 ? 1 : 40,
+      items: params.page === 2 ? [] : sampleResponse.items
+    }))
+    const wrapper = mountCard()
+    await flushPromises()
+    await wrapper.findAllComponents(SelectStub)[1].vm.$emit('update:modelValue', 'pagination')
+    await flushPromises()
+    mockGetOpenAITokenStats.mockClear()
+    await wrapper.findAll('button')[1].trigger('click')
+    await flushPromises()
+    expect(mockGetOpenAITokenStats).toHaveBeenCalledTimes(2)
+    expect(mockGetOpenAITokenStats.mock.calls.map(call => call[0].page)).toEqual([2, 1])
+    wrapper.unmount()
   })
 
   it('默认不限定平台并展示各平台模型的统计', async () => {
@@ -102,7 +167,7 @@ describe('OpsOpenAITokenStatsCard', () => {
       platform: undefined,
       group_id: undefined,
       top_n: 20,
-    })
+    }, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     for (const model of models) {
       expect(wrapper.text()).toContain(model)
     }
@@ -136,7 +201,7 @@ describe('OpsOpenAITokenStatsCard', () => {
     await flushPromises()
     await wrapper.findAll('button')[1].trigger('click')
     await flushPromises()
-    expect(mockGetOpenAITokenStats).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2 }))
+    expect(mockGetOpenAITokenStats).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2 }), expect.anything())
 
     mockGetOpenAITokenStats.mockClear()
     await wrapper.setProps({ platformFilter: platform })
@@ -149,7 +214,7 @@ describe('OpsOpenAITokenStatsCard', () => {
       group_id: 7,
       page: 1,
       page_size: 20,
-    })
+    }, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(wrapper.text()).toContain(model)
     expect(wrapper.text()).not.toContain('gpt-4o-mini')
   })
@@ -178,7 +243,7 @@ describe('OpsOpenAITokenStatsCard', () => {
         platform: 'openai',
         group_id: 7,
         top_n: 20,
-      })
+      }), expect.anything()
     )
 
     const selects = wrapper.findAllComponents(SelectStub)
@@ -190,7 +255,7 @@ describe('OpsOpenAITokenStatsCard', () => {
         time_range: '1h',
         platform: 'openai',
         group_id: 7,
-      })
+      }), expect.anything()
     )
   })
 
@@ -225,7 +290,7 @@ describe('OpsOpenAITokenStatsCard', () => {
       expect.objectContaining({
         page: 1,
         page_size: 20,
-      })
+      }), expect.anything()
     )
 
     const buttons = wrapper.findAll('button')
@@ -237,7 +302,7 @@ describe('OpsOpenAITokenStatsCard', () => {
       expect.objectContaining({
         page: 2,
         page_size: 20,
-      })
+      }), expect.anything()
     )
 
     selects = wrapper.findAllComponents(SelectStub)
@@ -250,7 +315,7 @@ describe('OpsOpenAITokenStatsCard', () => {
     expect(mockGetOpenAITokenStats).toHaveBeenCalledWith(
       expect.objectContaining({
         top_n: 50,
-      })
+      }), expect.anything()
     )
   })
 

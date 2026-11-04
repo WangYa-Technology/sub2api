@@ -187,6 +187,7 @@ export default {
         endTime: 'End Time'
       },
       openaiTokenStats: {
+      dataThrough: 'Data through:',
         title: 'Token Request Stats',
         viewModeTopN: 'TopN',
         viewModePagination: 'Pagination',

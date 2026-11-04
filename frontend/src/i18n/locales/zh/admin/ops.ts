@@ -183,6 +183,7 @@ export default {
         custom: '自定义'
       },
       openaiTokenStats: {
+      dataThrough: '数据截至：',
         title: 'Token 请求统计',
         viewModeTopN: 'TopN',
         viewModePagination: '分页',

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useMediaQuery } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import Select from '@/components/common/Select.vue'
@@ -34,6 +34,10 @@ const viewMode = ref<ViewMode>('topn')
 const topN = ref<number>(20)
 const page = ref<number>(1)
 const pageSize = ref<number>(20)
+let requestController: AbortController | null = null
+let requestSequence = 0
+let mounted = false
+let visible = true
 
 const items = computed(() => response.value?.items ?? [])
 const total = computed(() => response.value?.total ?? 0)
@@ -96,22 +100,40 @@ function buildParams() {
   return params
 }
 
-async function loadData() {
+function isAbortError(err: unknown): boolean {
+  return !!err && typeof err === 'object' && 'name' in err && (err as { name?: unknown }).name === 'AbortError'
+}
+
+function abortCurrentRequest() {
+  requestController?.abort()
+  requestController = null
+}
+
+async function loadData(force = false) {
+  if (!mounted || (!visible && !force)) return
+  abortCurrentRequest()
+  const controller = new AbortController()
+  requestController = controller
+  const sequence = ++requestSequence
   loading.value = true
   errorMessage.value = ''
   try {
-    response.value = await opsAPI.getOpenAITokenStats(buildParams())
+    const result = await opsAPI.getOpenAITokenStats(buildParams(), { signal: controller.signal })
+    if (sequence !== requestSequence || controller.signal.aborted) return
+    response.value = result
     // 防御：若 total 变化导致当前页超出最大页，则回退到末页并重新拉取一次。
     if (viewMode.value === 'pagination' && page.value > totalPages.value) {
       page.value = totalPages.value
-      response.value = await opsAPI.getOpenAITokenStats(buildParams())
+      return
     }
   } catch (err: any) {
+    if (isAbortError(err) || controller.signal.aborted || sequence !== requestSequence) return
     console.error('[OpsOpenAITokenStatsCard] Failed to load data', err)
     response.value = null
     errorMessage.value = err?.message || t('admin.ops.openaiTokenStats.failedToLoad')
   } finally {
-    loading.value = false
+    if (sequence === requestSequence) loading.value = false
+    if (requestController === controller) requestController = null
   }
 }
 
@@ -141,10 +163,37 @@ watch(
       return
     }
 
+    const onlyRefresh = prev && Object.keys(next).every(key => key === 'refreshToken' || next[key as keyof typeof next] === prev[key as keyof typeof prev])
+    if (onlyRefresh && loading.value) return
     void loadData()
   },
-  { immediate: true }
+  { immediate: false }
 )
+
+function handleVisibilityChange() {
+  visible = !document.hidden
+  if (!visible) {
+    abortCurrentRequest()
+    requestSequence += 1
+    loading.value = false
+    return
+  }
+  // Resume on the next shared cadence or manual refresh; do not catch up.
+}
+
+onMounted(() => {
+  mounted = true
+  visible = !document.hidden
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  void loadData()
+})
+
+onUnmounted(() => {
+  mounted = false
+  requestSequence += 1
+  abortCurrentRequest()
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+})
 
 function onPrevPage() {
   if (viewMode.value !== 'pagination') return
@@ -195,9 +244,13 @@ function onNextPage() {
             {{ t('admin.ops.openaiTokenStats.pageInfo', { page, total: totalPages }) }}
           </span>
         </template>
+        <button class="btn btn-secondary btn-sm" :disabled="loading" @click="loadData(true)">
+          {{ t('common.refresh') }}
+        </button>
       </div>
     </div>
 
+    <p v-if="response" class="mb-2 text-xs text-gray-500">{{ t('admin.ops.openaiTokenStats.dataThrough') }} {{ new Date(response.end_time).toLocaleString() }}</p>
     <div v-if="errorMessage" class="mb-4 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600 dark:bg-red-900/20 dark:text-red-400">
       {{ errorMessage }}
     </div>

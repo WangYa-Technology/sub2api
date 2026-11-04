@@ -386,7 +386,7 @@ func defaultOpsAdvancedSettings() *OpsAdvancedSettings {
 		DisplayOpenAITokenStats:         false,
 		DisplayAlertEvents:              true,
 		AutoRefreshEnabled:              false,
-		AutoRefreshIntervalSec:          30,
+		AutoRefreshIntervalSec:          60,
 	}
 }
 
@@ -423,9 +423,10 @@ func normalizeOpsAdvancedSettings(cfg *OpsAdvancedSettings) {
 	if cfg.DataRetention.HourlyMetricsRetentionDays < 0 {
 		cfg.DataRetention.HourlyMetricsRetentionDays = 30
 	}
-	// Normalize auto refresh interval (default 30 seconds)
+	// Normalize auto refresh interval (default 60 seconds). Existing persisted
+	// values remain authoritative and are not rewritten here.
 	if cfg.AutoRefreshIntervalSec <= 0 {
-		cfg.AutoRefreshIntervalSec = 30
+		cfg.AutoRefreshIntervalSec = 60
 	}
 }
 

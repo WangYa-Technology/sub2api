@@ -2,15 +2,16 @@ package repository
 
 import (
 	"context"
-	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
-func (r *opsRepository) GetOpenAITokenStats(ctx context.Context, filter *service.OpsOpenAITokenStatsFilter) (*service.OpsOpenAITokenStatsResponse, error) {
-	if r == nil || r.db == nil {
+func queryOpenAITokenStats(ctx context.Context, queryer tokenStatsRowQueryer, filter *service.OpsOpenAITokenStatsFilter) (*service.OpsOpenAITokenStatsResponse, error) {
+	if queryer == nil {
 		return nil, fmt.Errorf("nil ops repository")
 	}
 	if filter == nil {
@@ -34,7 +35,7 @@ func (r *opsRepository) GetOpenAITokenStats(ctx context.Context, filter *service
 	join, where, baseArgs, next := buildUsageWhere(dashboardFilter, dashboardFilter.StartTime, dashboardFilter.EndTime, 1)
 
 	baseCTE := `
-WITH stats AS (
+WITH stats AS MATERIALIZED (
   SELECT
     ul.model AS model,
     COUNT(*)::bigint AS request_count,
@@ -58,24 +59,8 @@ WITH stats AS (
 )
 `
 
-	countSQL := baseCTE + `SELECT COUNT(*) FROM stats`
-	var total int64
-	if err := r.db.QueryRowContext(ctx, countSQL, baseArgs...).Scan(&total); err != nil {
-		return nil, err
-	}
-
-	querySQL := baseCTE + `
-SELECT
-  model,
-  request_count,
-  avg_tokens_per_sec,
-  avg_first_token_ms,
-  total_output_tokens,
-  avg_duration_ms,
-  requests_with_first_token
-FROM stats
-ORDER BY request_count DESC, model ASC`
-
+	querySQL := baseCTE + `, page AS (
+SELECT * FROM stats ORDER BY request_count DESC, model ASC`
 	args := make([]any, 0, len(baseArgs)+2)
 	args = append(args, baseArgs...)
 
@@ -88,39 +73,20 @@ ORDER BY request_count DESC, model ASC`
 		args = append(args, filter.PageSize, offset)
 	}
 
-	rows, err := r.db.QueryContext(ctx, querySQL, args...)
-	if err != nil {
+	querySQL += `
+)
+SELECT (SELECT COUNT(*) FROM stats),
+       COALESCE((SELECT json_agg(page ORDER BY request_count DESC, model ASC) FROM page), '[]'::json)`
+	// Bound the expensive aggregate and propagate request cancellation to PostgreSQL.
+	ctx, cancel := context.WithTimeout(ctx, 55*time.Second)
+	defer cancel()
+	var total int64
+	var raw []byte
+	if err := queryer.QueryRowContext(ctx, querySQL, args...).Scan(&total, &raw); err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-
-	items := make([]*service.OpsOpenAITokenStatsItem, 0, 32)
-	for rows.Next() {
-		item := &service.OpsOpenAITokenStatsItem{}
-		var avgTPS sql.NullFloat64
-		var avgFirstToken sql.NullFloat64
-		if err := rows.Scan(
-			&item.Model,
-			&item.RequestCount,
-			&avgTPS,
-			&avgFirstToken,
-			&item.TotalOutputTokens,
-			&item.AvgDurationMs,
-			&item.RequestsWithFirstToken,
-		); err != nil {
-			return nil, err
-		}
-		if avgTPS.Valid {
-			v := avgTPS.Float64
-			item.AvgTokensPerSec = &v
-		}
-		if avgFirstToken.Valid {
-			v := avgFirstToken.Float64
-			item.AvgFirstTokenMs = &v
-		}
-		items = append(items, item)
-	}
-	if err := rows.Err(); err != nil {
+	items := make([]*service.OpsOpenAITokenStatsItem, 0)
+	if err := json.Unmarshal(raw, &items); err != nil {
 		return nil, err
 	}
 

@@ -260,7 +260,8 @@ func parseOpsOpenAITokenStatsFilter(c *gin.Context) (*service.OpsOpenAITokenStat
 	if !ok {
 		return nil, fmt.Errorf("invalid time_range")
 	}
-	end := time.Now().UTC()
+	// Stable one-minute buckets keep the exact rolling duration while sharing cache keys.
+	end := time.Now().UTC().Truncate(time.Minute)
 	start := end.Add(-dur)
 
 	filter := &service.OpsOpenAITokenStatsFilter{

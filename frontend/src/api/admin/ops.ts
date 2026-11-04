@@ -1150,6 +1150,7 @@ export async function getOpenAITokenStats(
 ): Promise<OpsOpenAITokenStatsResponse> {
   const { data } = await apiClient.get<OpsOpenAITokenStatsResponse>('/admin/ops/dashboard/openai-token-stats', {
     params,
+    timeout: 65000, // Shared-cache wait (58s) plus transport margin; scoped to this endpoint.
     signal: options.signal
   })
   return data

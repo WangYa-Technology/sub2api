@@ -643,9 +643,23 @@ func (r *affiliateRepository) ListAffiliateRebateRecords(ctx context.Context, fi
 	baseJoin := `
 FROM user_affiliate_ledger ual
 LEFT JOIN payment_orders po ON po.id = ual.source_order_id
-LEFT JOIN redeem_codes rc ON ual.source_type = 'redeem_code'
-  AND ual.source_ref IS NOT NULL
-  AND (ual.source_ref = rc.id::text OR ual.source_ref = rc.code)
+LEFT JOIN LATERAL (
+  -- Current references are IDs; keep legacy code references as a fallback.
+  -- Guard both syntax and bigint range before casting untrusted historical text.
+  SELECT candidate.* FROM (
+    SELECT by_id.*, 0 AS reference_priority FROM redeem_codes by_id
+    WHERE ual.source_type = 'redeem_code' AND by_id.id =
+      CASE WHEN ual.source_ref ~ '^[1-9][0-9]{0,18}$' THEN
+        CASE WHEN ual.source_ref::numeric <= 9223372036854775807
+          THEN ual.source_ref::bigint END
+      END
+    UNION ALL
+    SELECT by_code.*, 1 AS reference_priority FROM redeem_codes by_code
+    WHERE ual.source_type = 'redeem_code' AND by_code.code = ual.source_ref
+  ) candidate
+  ORDER BY candidate.reference_priority
+  LIMIT 1
+) rc ON TRUE
 LEFT JOIN groups redeem_group ON redeem_group.id = rc.group_id
 LEFT JOIN groups order_group ON order_group.id = po.subscription_group_id
 LEFT JOIN users invitee ON invitee.id = ual.source_user_id
@@ -655,7 +669,16 @@ WHERE ual.action = 'accrue'`
 		where = strings.Replace(where, "WHERE ", " AND ", 1)
 	}
 
-	total, err := queryAffiliateRecordCount(ctx, client, "SELECT COUNT(*) "+baseJoin+where, args...)
+	// The unsearched count only needs ledger filters and inviter existence.
+	// Avoid resolving every historical source before returning the first page.
+	countJoin := baseJoin
+	if strings.TrimSpace(filter.Search) == "" {
+		countJoin = `
+FROM user_affiliate_ledger ual
+JOIN users inviter ON inviter.id = ual.user_id
+WHERE ual.action = 'accrue'`
+	}
+	total, err := queryAffiliateRecordCount(ctx, client, "SELECT COUNT(*) "+countJoin+where, args...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -672,7 +695,7 @@ WHERE ual.action = 'accrue'`
 		"payment_type":  "po.payment_type",
 		"order_status":  "po.status",
 		"created_at":    "ual.created_at",
-	}, "ual.created_at")
+	}, "ual.created_at") + ", ual.id DESC"
 	args = append(args, filter.PageSize, (filter.Page-1)*filter.PageSize)
 	rows, err := client.QueryContext(ctx, `
 SELECT ual.id,

@@ -506,3 +506,7 @@ d3c656fb8 hcai: prevent grouped sidebar items from rendering as standalone links
 ### 2026-11-04 后续差异：Token 统计数据库缓存
 
 在同一工作基线上替换首轮 Redis 实现：新增 `249_ops_token_stats_cache.sql`、repository 缓存/事务锁和跨连接池 PostgreSQL 集成测试；service 仅保留 key 与 singleflight，移除 Redis 字段及 provider/Wire 依赖改动。查询表达式和前端方案保持不变。新增 [数据库缓存实现记录](Token请求统计数据库缓存实现-2026-11-04.md)；不改写历史基线，未部署。
+
+## 2026-11-11：0.2.21-hcai 基线追加
+
+保留历史快照。新上游基线为v0.2.21 `10ba8f9b4dc2e6023d4a9879ab77b21841babd10`；对应[净差异清单](上游净差异清单-0.2.21-hcai.md)及[冲突记录](上游合并记录-0.2.21-hcai.md)。本轮另修复HCAI管理员返利来源关联查询，不更改资金写入行为；源码和集成测试为affiliate_repo相关三文件。

@@ -513,7 +513,7 @@ function usesIndependentRequestRate(m: PlazaModel): boolean {
 /** 按次/按图片行的生效倍率。 */
 function requestRate(m: PlazaModel): number {
   if (usesIndependentImageRate(m)) return props.imageRateMultiplier ?? 1
-  if (usesIndependentVideoRate(m)) return props.videoRateMultiplier ?? 1
+  if (usesIndependentVideoRate(m)) return Math.max(0, props.videoRateMultiplier ?? 1)
   return effectiveRate.value
 }
 

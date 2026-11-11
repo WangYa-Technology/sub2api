@@ -800,3 +800,55 @@ func TestAffiliateRepository_ListAffiliateRebateRecords_IncludesNonOrderAccruals
 	require.Equal(t, invitee.ID, *record.InviteeID)
 	require.InDelta(t, 2.0, record.RebateAmount, 1e-9)
 }
+
+// Exercise the actual PostgreSQL query, including legacy references and ID/code
+// ambiguity; a source match must never multiply ledger rows or pagination totals.
+func TestAffiliateRepository_RebateSourceLookup(t *testing.T) {
+	ctx := context.Background()
+	tx := testEntTx(t)
+	txCtx := dbent.NewTxContext(ctx, tx)
+	client := tx.Client()
+	repo := NewAffiliateRepository(client, integrationDB)
+	inviter := mustCreateAffiliateWithdrawUser(t, client, "lookup-inviter")
+	invitee := mustCreateAffiliateWithdrawUser(t, client, "lookup-invitee")
+	var redeemID int64
+	rows, err := client.QueryContext(txCtx, `INSERT INTO redeem_codes(code, type, value, sale_price) VALUES ($1, 'balance', 10, 11) RETURNING id`, fmt.Sprintf("lookup-%d", inviter.ID))
+	require.NoError(t, err)
+	require.True(t, rows.Next())
+	require.NoError(t, rows.Scan(&redeemID))
+	require.NoError(t, rows.Close())
+	// A different code equals the first row's numeric ID: ID lookup wins.
+	_, err = client.ExecContext(txCtx, `INSERT INTO redeem_codes(code, type, value, sale_price) VALUES ($1, 'balance', 20, 22)`, fmt.Sprint(redeemID))
+	require.NoError(t, err)
+	refs := []string{fmt.Sprint(redeemID), fmt.Sprintf("lookup-%d", inviter.ID), "9223372036854775808", "999999999999999999999999", "not-an-id", "00001"}
+	for i, ref := range refs {
+		_, err = client.ExecContext(txCtx, `INSERT INTO user_affiliate_ledger(user_id, action, amount, source_user_id, source_type, source_ref, created_at) VALUES ($1, 'accrue', 1, $2, 'redeem_code', $3, $4)`, inviter.ID, invitee.ID, ref, time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC).Add(time.Duration(i)*time.Hour))
+		require.NoError(t, err)
+	}
+	for _, search := range []string{"", inviter.Email} {
+		t.Run("search="+search, func(t *testing.T) {
+			filter := service.AffiliateRecordFilter{Search: search, Page: 1, PageSize: 100, SortBy: "created_at", SortDesc: false}
+			// Restrict no-search results to this transaction's rows using dates.
+			start := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+			end := start.Add(6*time.Hour - time.Nanosecond)
+			filter.StartAt, filter.EndAt = &start, &end
+			items, total, err := repo.ListAffiliateRebateRecords(txCtx, filter)
+			require.NoError(t, err)
+			require.EqualValues(t, len(refs), total)
+			require.Len(t, items, len(refs))
+			for _, item := range items[:2] {
+				require.NotNil(t, item.RedeemSalePrice)
+				require.Equal(t, float64(11), *item.RedeemSalePrice)
+			}
+			for _, item := range items[2:] {
+				require.Nil(t, item.RedeemSalePrice)
+			}
+			filter.PageSize, filter.Page = 2, 2
+			paged, pagedTotal, err := repo.ListAffiliateRebateRecords(txCtx, filter)
+			require.NoError(t, err)
+			require.Equal(t, total, pagedTotal)
+			require.Len(t, paged, 2)
+			require.Equal(t, items[2].LedgerID, paged[0].LedgerID)
+		})
+	}
+}

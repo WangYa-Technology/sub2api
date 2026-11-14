@@ -46,6 +46,7 @@ func TestCompareVersionsUsesNumericBaseVersion(t *testing.T) {
 		want            int
 	}{
 		{name: "custom suffix equals base release", current: "v0.1.164-fix", latest: "v0.1.164", want: 0},
+		{name: "hcai fix tag preserves numeric comparison", current: "v0.2.21-hcai", latest: "v0.2.21-hcai(fix1)", want: 0},
 		{name: "hcai incremental suffix preserves numeric comparison", current: "v0.2.19-hcai", latest: "v0.2.19-hcai.1", want: 0},
 		{name: "hcai suffix equals base release", current: "v0.1.165-hcai", latest: "v0.1.165", want: 0},
 		{name: "build metadata equals base release", current: "v0.1.164+hcai", latest: "v0.1.164", want: 0},

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -176,6 +177,9 @@ func (s *SettingService) SaveWebSearchEmulationConfig(ctx context.Context, cfg *
 
 	// Hot-reload: rebuild the global Manager with new config
 	s.rebuildWebSearchManager(ctx)
+	if s.frontendInvalidation != nil {
+		s.frontendInvalidation.publish("websearch.updated")
+	}
 	return nil
 }
 
@@ -221,22 +225,50 @@ func (s *SettingService) IsWebSearchEmulationEnabled(ctx context.Context) bool {
 // The infra layer (main/wire) provides this builder, keeping redis out of the service layer.
 // Triggers initial build.
 func (s *SettingService) SetWebSearchManagerBuilder(ctx context.Context, builder WebSearchManagerBuilder) {
+	s.webSearchRuntimeMu.Lock()
 	s.webSearchManagerBuilder = builder
+	s.webSearchRuntimeLoaded = false
+	s.webSearchRuntimeMu.Unlock()
 	s.rebuildWebSearchManager(ctx)
 }
 
-// rebuildWebSearchManager reads the current config, resolves proxy URLs, and invokes the builder.
+// Always read PostgreSQL, not the TTL cache. Only replace the Manager when
+// effective config or resolved proxy URLs change, preserving healthy clients.
 func (s *SettingService) rebuildWebSearchManager(ctx context.Context) {
+	s.webSearchRuntimeMu.Lock()
+	defer s.webSearchRuntimeMu.Unlock()
 	if s.webSearchManagerBuilder == nil {
 		return
 	}
-	cfg, err := s.GetWebSearchEmulationConfig(ctx)
+	ctx, cancel := context.WithTimeout(ctx, webSearchEmulationDBTimeout)
+	defer cancel()
+	raw, err := s.settingRepo.GetValue(ctx, SettingKeyWebSearchEmulationConfig)
+	if errors.Is(err, ErrSettingNotFound) {
+		raw = ""
+		err = nil
+	}
 	if err != nil {
 		SetWebSearchManager(nil)
+		s.webSearchRuntimeLoaded = false
+		slog.Warn("websearch runtime reload failed; manager disabled until retry", "error", err)
 		return
 	}
+	cfg := parseWebSearchConfigJSON(raw)
 	proxyURLs := s.resolveProviderProxyURLs(ctx, cfg)
+	effective, _ := json.Marshal(struct {
+		Config  *WebSearchEmulationConfig
+		Proxies map[int64]string
+	}{cfg, proxyURLs})
+	fingerprint := fmt.Sprintf("%x", sha256.Sum256(effective))
+	// Refresh the lightweight gate even if the effective Manager is unchanged.
+	webSearchEmulationSF.Forget(sfKeyWebSearchConfig)
+	webSearchEmulationCache.Store(&cachedWebSearchEmulationConfig{config: cfg, expiresAt: time.Now().Add(webSearchEmulationCacheTTL).UnixNano()})
+	if s.webSearchRuntimeLoaded && s.webSearchRuntimeFingerprint == fingerprint {
+		return
+	}
 	s.webSearchManagerBuilder(cfg, proxyURLs)
+	s.webSearchRuntimeFingerprint = fingerprint
+	s.webSearchRuntimeLoaded = true
 }
 
 // resolveProviderProxyURLs collects proxy IDs from providers and resolves them to URLs.

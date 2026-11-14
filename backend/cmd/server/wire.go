@@ -137,8 +137,14 @@ func provideCleanup(
 	openAIAutoReset *service.OpenAIQuotaAutoResetService,
 	promptAudit *securityaudit.PromptService,
 	pluginManager *service.PluginManager,
+	settingService *service.SettingService,
+	errorPassthrough *service.ErrorPassthroughService,
+	tlsProfiles *service.TLSFingerprintProfileService,
 ) func() {
 	return func() {
+		settingService.StopFrontendInvalidation()
+		errorPassthrough.Stop()
+		tlsProfiles.Stop()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 

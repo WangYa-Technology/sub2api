@@ -952,6 +952,7 @@ func TestNewService_StartupReloadFromDBToHealStaleCache(t *testing.T) {
 	cache := newMockErrorPassthroughCache([]*model.ErrorPassthroughRule{staleRule}, true)
 
 	svc := NewErrorPassthroughService(repo, cache)
+	t.Cleanup(svc.Stop)
 
 	matchedFresh := svc.MatchRule("anthropic", 503, []byte(`{"message":"fresh keyword"}`))
 	require.NotNil(t, matchedFresh)

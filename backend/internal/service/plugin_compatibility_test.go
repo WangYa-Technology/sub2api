@@ -69,11 +69,36 @@ func TestHCAIPluginVersionRanges(t *testing.T) {
 		{"0.2.7-hcai.1", ">=0.2.7-hcai.2", false},
 		{"0.2.7-hcai.2", ">=0.2.7-hcai.2 <0.3.0", true},
 		{"0.2.7", ">=0.2.7 <0.3.0", true},
+		{"0.2.21-hcai(fix1)", ">=0.2.21 <0.3.0", true},
+		{"v0.2.21-hcai(fix12)", "=0.2.21", true},
+		{"0.2.21-hcai(fix1)", ">=0.2.21-hcai.2", false},
+		{"0.2.21-hcai(fix1)", ">=0.2.22", false},
+		{"0.2.21-hcai(fix01)", ">=0.2.21", false},
+		{"0.2.21-hcai(fix0)", ">=0.2.21", false},
+		{"0.2.21-hcai(fix1)extra", ">=0.2.21", false},
+		{"0.2.21-hcai(fix)", ">=0.2.21", false},
+		{"0.2.21-hcai(fixx)", ">=0.2.21", false},
+		{"0.2-hcai(fix1)", ">=0.2.0", false},
 	} {
 		t.Run(tt.version+"/"+tt.rangeExpr, func(t *testing.T) {
 			assert.Equal(t, tt.compatible, matchesSemverRange(tt.version, tt.rangeExpr))
 		})
 	}
+}
+
+func TestHCAIFixTagCompatibility(t *testing.T) {
+	manifest := testPluginManifest(nil)
+	manifest.Requires.Sub2API = ">=0.2.21 <0.3.0"
+	manifest.Requires.TestedSub2APIVersions = []string{"0.2.21"}
+	host := PluginHostInfo{Version: "0.2.21-hcai(fix1)", BuildType: "release"}
+	result := EvaluatePluginCompatibility(manifest, host)
+	require.True(t, result.Compatible)
+	assert.False(t, result.Tested)
+	assert.Equal(t, host.Version, result.CurrentSub2API)
+	manifest.Requires.TestedSub2APIVersions = []string{"v0.2.21-hcai(fix1)"}
+	assert.True(t, EvaluatePluginCompatibility(manifest, host).Tested)
+	manifest.Requires.PluginProtocol++
+	assert.False(t, EvaluatePluginCompatibility(manifest, host).Compatible)
 }
 
 func TestHCAICompatibilityPreservesTestedAndProtocolChecks(t *testing.T) {

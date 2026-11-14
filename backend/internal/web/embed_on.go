@@ -166,6 +166,7 @@ func (s *FrontendServer) serveIndexHTML(c *gin.Context) {
 		return
 	}
 
+	generation := s.cache.Version()
 	// Cache miss - fetch settings and render
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 	defer cancel()
@@ -187,15 +188,14 @@ func (s *FrontendServer) serveIndexHTML(c *gin.Context) {
 	}
 
 	rendered := s.injectSettings(settingsJSON)
-	s.cache.Set(rendered, settingsJSON)
+	s.cache.SetIfVersion(rendered, settingsJSON, generation)
 
 	// Replace nonce placeholder with actual nonce before serving
 	content := replaceNoncePlaceholder(rendered, nonce)
 
-	cached = s.cache.Get()
-	if cached != nil {
-		c.Header("ETag", cached.ETag)
-	}
+	// The response must carry the ETag for this render, not a different
+	// concurrent render that may now be in the shared cache.
+	c.Header("ETag", s.cache.generateETag(settingsJSON))
 	c.Header("Cache-Control", "no-cache")
 	c.Data(http.StatusOK, "text/html; charset=utf-8", content)
 	c.Abort()

@@ -31,8 +31,10 @@ type TLSFingerprintProfileCache interface {
 
 // TLSFingerprintProfileService TLS 指纹模板管理服务
 type TLSFingerprintProfileService struct {
-	repo  TLSFingerprintProfileRepository
-	cache TLSFingerprintProfileCache
+	refreshMu  sync.Mutex
+	reconciler *cacheReconciler
+	repo       TLSFingerprintProfileRepository
+	cache      TLSFingerprintProfileCache
 
 	// 本地 ID→Profile 映射缓存，用于 DoWithTLS 热路径快速查找
 	localCache map[int64]*model.TLSFingerprintProfile
@@ -59,11 +61,7 @@ func NewTLSFingerprintProfileService(
 	}
 
 	if cache != nil {
-		cache.SubscribeUpdates(ctx, func() {
-			if err := svc.refreshLocalCache(context.Background()); err != nil {
-				logger.LegacyPrintf("service.tls_fp_profile", "[TLSFPProfileService] Failed to refresh cache on notification: %v", err)
-			}
-		})
+		svc.reconciler = startCacheReconciler("TLSFingerprintProfileService", cache, svc.reloadFromDB, cacheReconcileInterval)
 	}
 
 	return svc
@@ -207,6 +205,11 @@ func (s *TLSFingerprintProfileService) refreshLocalCache(ctx context.Context) er
 }
 
 func (s *TLSFingerprintProfileService) reloadFromDB(ctx context.Context) error {
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	profiles, err := s.repo.List(ctx)
 	if err != nil {
 		return err
@@ -255,5 +258,12 @@ func (s *TLSFingerprintProfileService) invalidateAndNotify(ctx context.Context) 
 		if err := s.cache.NotifyUpdate(ctx); err != nil {
 			logger.LegacyPrintf("service.tls_fp_profile", "[TLSFPProfileService] Failed to notify cache update: %v", err)
 		}
+	}
+}
+
+// Stop releases the notification subscription and periodic DB reconciler.
+func (s *TLSFingerprintProfileService) Stop() {
+	if s != nil {
+		s.reconciler.stop()
 	}
 }

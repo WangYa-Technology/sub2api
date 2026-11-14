@@ -41,6 +41,9 @@ func (c *tlsFingerprintProfileCache) Get(ctx context.Context) ([]*model.TLSFinge
 	}
 	c.localMu.RUnlock()
 
+	if c.rdb == nil {
+		return nil, false
+	}
 	data, err := c.rdb.Get(ctx, tlsFPProfileCacheKey).Bytes()
 	if err != nil {
 		if err != redis.Nil {
@@ -69,8 +72,10 @@ func (c *tlsFingerprintProfileCache) Set(ctx context.Context, profiles []*model.
 		return err
 	}
 
-	if err := c.rdb.Set(ctx, tlsFPProfileCacheKey, data, tlsFPProfileCacheTTL).Err(); err != nil {
-		return err
+	if c.rdb != nil {
+		if err := c.rdb.Set(ctx, tlsFPProfileCacheKey, data, tlsFPProfileCacheTTL).Err(); err != nil {
+			return err
+		}
 	}
 
 	c.localMu.Lock()
@@ -86,37 +91,31 @@ func (c *tlsFingerprintProfileCache) Invalidate(ctx context.Context) error {
 	c.localCache = nil
 	c.localMu.Unlock()
 
+	if c.rdb == nil {
+		return nil
+	}
 	return c.rdb.Del(ctx, tlsFPProfileCacheKey).Err()
 }
 
 // NotifyUpdate 通知其他实例刷新缓存
 func (c *tlsFingerprintProfileCache) NotifyUpdate(ctx context.Context) error {
+	if c.rdb == nil {
+		return nil
+	}
 	return c.rdb.Publish(ctx, tlsFPProfilePubSubKey, "refresh").Err()
 }
 
-// SubscribeUpdates 订阅缓存更新通知
+// SubscribeUpdates preserves the existing cache interface.
 func (c *tlsFingerprintProfileCache) SubscribeUpdates(ctx context.Context, handler func()) {
-	go func() {
-		sub := c.rdb.Subscribe(ctx, tlsFPProfilePubSubKey)
-		defer func() { _ = sub.Close() }()
+	c.SubscribeUpdatesManaged(ctx, handler)
+}
 
-		ch := sub.Channel()
-		for {
-			select {
-			case <-ctx.Done():
-				slog.Debug("tls_fp_profile_cache_subscriber_stopped", "reason", "context_done")
-				return
-			case msg := <-ch:
-				if msg == nil {
-					slog.Warn("tls_fp_profile_cache_subscriber_stopped", "reason", "channel_closed")
-					return
-				}
-				c.localMu.Lock()
-				c.localCache = nil
-				c.localMu.Unlock()
-
-				handler()
-			}
-		}
-	}()
+// SubscribeUpdatesManaged returns an idempotent stop-and-join function.
+func (c *tlsFingerprintProfileCache) SubscribeUpdatesManaged(ctx context.Context, handler func()) func() {
+	return subscribeCacheUpdates(ctx, c.rdb, tlsFPProfilePubSubKey, func() {
+		c.localMu.Lock()
+		c.localCache = nil
+		c.localMu.Unlock()
+		handler()
+	})
 }

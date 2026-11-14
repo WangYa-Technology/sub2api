@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"log"
+	"log/slog"
 	"sync/atomic"
 	"time"
 
@@ -48,6 +49,7 @@ func SetupRouter(
 		defer cancel()
 		origins, err := settingService.GetFrameSrcOrigins(ctx)
 		if err != nil {
+			slog.Warn("failed to refresh settings frame origins; retaining previous origins", "error", err)
 			// 获取失败时保留已有缓存，避免 frame-src 被意外清空
 			return
 		}
@@ -70,24 +72,24 @@ func SetupRouter(
 	}))
 	r.Use(middleware2.ServerTiming(cfg.Server.EnableServerTiming))
 
+	invalidateFrontend := func() {}
 	// Serve embedded frontend with settings injection if available
 	if web.HasEmbeddedFrontend() {
 		frontendServer, err := web.NewFrontendServer(settingService) //nolint:staticcheck // SA4023: the !embed stub always errors; embed builds can return nil
 		if err != nil {                                              //nolint:staticcheck // SA4023: see above
 			log.Printf("Warning: Failed to create frontend server with settings injection: %v, using legacy mode", err)
 			r.Use(web.ServeEmbeddedFrontend())
-			settingService.SetOnUpdateCallback(refreshFrameOrigins)
 		} else {
 			// Register combined callback: invalidate HTML cache + refresh frame origins
-			settingService.SetOnUpdateCallback(func() {
-				frontendServer.InvalidateCache()
-				refreshFrameOrigins()
-			})
+			invalidateFrontend = frontendServer.InvalidateCache
 			r.Use(frontendServer.Middleware())
 		}
-	} else {
-		settingService.SetOnUpdateCallback(refreshFrameOrigins)
 	}
+
+	settingService.StartFrontendInvalidation(redisClient, func() {
+		invalidateFrontend()
+		refreshFrameOrigins()
+	})
 
 	// 注册路由
 	registerRoutes(r, handlers, jwtAuth, optionalJWTAuth, adminAuth, apiKeyAuth, auditLog, stepUpAuth, apiKeyService, subscriptionService, opsService, settingService, compositeResolver, cfg, redisClient)

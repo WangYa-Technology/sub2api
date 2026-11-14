@@ -59,6 +59,20 @@ func normalizeSemver(version string) string {
 	if !strings.HasPrefix(v, "v") {
 		v = "v" + v
 	}
+	// Keep the published HCAI fix tag intact for display; normalize only the
+	// explicitly supported X.Y.Z-hcai(fixN) spelling for version comparisons.
+	if base, suffix, ok := strings.Cut(v, "-hcai(fix"); ok {
+		revision, closed := strings.CutSuffix(suffix, ")")
+		if !closed || revision == "" || revision[0] == '0' || !semver.IsValid(base) || semver.Prerelease(base) != "" || semver.Build(base) != "" || semver.Canonical(base) != base {
+			return ""
+		}
+		for _, digit := range revision {
+			if digit < '0' || digit > '9' {
+				return ""
+			}
+		}
+		v = base + "-hcai." + revision
+	}
 	if !semver.IsValid(v) {
 		return ""
 	}

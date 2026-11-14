@@ -43,6 +43,9 @@ func (c *errorPassthroughCache) Get(ctx context.Context) ([]*model.ErrorPassthro
 	c.localMu.RUnlock()
 
 	// 从 Redis 获取
+	if c.rdb == nil {
+		return nil, false
+	}
 	data, err := c.rdb.Get(ctx, errorPassthroughCacheKey).Bytes()
 	if err != nil {
 		if err != redis.Nil {
@@ -72,8 +75,10 @@ func (c *errorPassthroughCache) Set(ctx context.Context, rules []*model.ErrorPas
 		return err
 	}
 
-	if err := c.rdb.Set(ctx, errorPassthroughCacheKey, data, errorPassthroughCacheTTL).Err(); err != nil {
-		return err
+	if c.rdb != nil {
+		if err := c.rdb.Set(ctx, errorPassthroughCacheKey, data, errorPassthroughCacheTTL).Err(); err != nil {
+			return err
+		}
 	}
 
 	// 更新本地缓存
@@ -92,37 +97,31 @@ func (c *errorPassthroughCache) Invalidate(ctx context.Context) error {
 	c.localMu.Unlock()
 
 	// 清除 Redis 缓存
+	if c.rdb == nil {
+		return nil
+	}
 	return c.rdb.Del(ctx, errorPassthroughCacheKey).Err()
 }
 
 // NotifyUpdate 通知其他实例刷新缓存
 func (c *errorPassthroughCache) NotifyUpdate(ctx context.Context) error {
+	if c.rdb == nil {
+		return nil
+	}
 	return c.rdb.Publish(ctx, errorPassthroughPubSubKey, "refresh").Err()
 }
 
-// SubscribeUpdates 订阅缓存更新通知
+// SubscribeUpdates preserves the existing cache interface.
 func (c *errorPassthroughCache) SubscribeUpdates(ctx context.Context, handler func()) {
-	go func() {
-		sub := c.rdb.Subscribe(ctx, errorPassthroughPubSubKey)
-		defer func() { _ = sub.Close() }()
+	c.SubscribeUpdatesManaged(ctx, handler)
+}
 
-		ch := sub.Channel()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case msg := <-ch:
-				if msg == nil {
-					return
-				}
-				// 清除本地缓存，下次访问时会从 Redis 或数据库重新加载
-				c.localMu.Lock()
-				c.localCache = nil
-				c.localMu.Unlock()
-
-				// 调用处理函数
-				handler()
-			}
-		}
-	}()
+// SubscribeUpdatesManaged returns an idempotent stop-and-join function.
+func (c *errorPassthroughCache) SubscribeUpdatesManaged(ctx context.Context, handler func()) func() {
+	return subscribeCacheUpdates(ctx, c.rdb, errorPassthroughPubSubKey, func() {
+		c.localMu.Lock()
+		c.localCache = nil
+		c.localMu.Unlock()
+		handler()
+	})
 }

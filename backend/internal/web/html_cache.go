@@ -61,6 +61,26 @@ func (c *HTMLCache) Get() *CachedHTML {
 	}
 }
 
+// Version captures the generation before fetching settings from storage.
+func (c *HTMLCache) Version() uint64 {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.settingsVersion
+}
+
+// SetIfVersion prevents an in-flight old render from repopulating a cache
+// that was invalidated while its settings query was running.
+func (c *HTMLCache) SetIfVersion(html, settingsJSON []byte, version uint64) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.settingsVersion != version {
+		return false
+	}
+	c.cachedHTML = html
+	c.etag = c.generateETag(settingsJSON)
+	return true
+}
+
 // Set updates the cache with new rendered HTML
 func (c *HTMLCache) Set(html []byte, settingsJSON []byte) {
 	c.mu.Lock()

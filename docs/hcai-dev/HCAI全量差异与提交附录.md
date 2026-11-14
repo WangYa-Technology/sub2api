@@ -510,3 +510,15 @@ d3c656fb8 hcai: prevent grouped sidebar items from rendering as standalone links
 ## 2026-11-11：0.2.21-hcai 基线追加
 
 保留历史快照。新上游基线为v0.2.21 `10ba8f9b4dc2e6023d4a9879ab77b21841babd10`；对应[净差异清单](上游净差异清单-0.2.21-hcai.md)及[冲突记录](上游合并记录-0.2.21-hcai.md)。本轮另修复HCAI管理员返利来源关联查询，不更改资金写入行为；源码和集成测试为affiliate_repo相关三文件。
+
+## 2026-11-14 待审核增量：设置缓存跨节点失效
+
+此为本地未提交增量，不改写 0.2.21-hcai 已发布基线。新增 service/setting_invalidation.go 及 service、admin handler、web 定向测试；修改 setting_service.go、server/router.go、cmd/server/wire.go/wire_gen.go/wire_gen_test.go，以及 web/html_cache.go/embed_on.go。功能范围为复用现有 Redis 发布/订阅失效元数据、重连与周期补偿、应用清理和 HTML 代次保护，不包含全设置热缓存同步、数据库迁移或新接口。文档增量见[实现记录](系统设置多节点缓存失效修复-2026-11-14.md)，测试与已知限制见该记录；尚未提交发布或部署。
+
+### 同日后续增量：四类运行时缓存
+
+在前述本地设置总线基础上，修改setting_update.go/websearch_config.go同步只读运行时；新增service/cache_reconciliation.go及repository/cache_subscription.go，修改错误透传/TLS服务及缓存适配器、Wire生命周期。新增setting_runtime_sync_test.go和cache_reconciliation_test.go；历史基线不变，未提交/发布/部署。[实现与验证](四类运行时缓存多节点一致性修复-2026-11-14.md)。
+
+## 2026-11-14 修订版本发布准备
+
+按用户指定版本 `v0.2.21-hcai(fix1)` 整理本地多节点缓存修复并保留已发布 0.2.21 历史。另补充该括号版本的插件兼容规范化及回归，数字基础版本更新比较行为不变。发布状态、最终 CI 和产物证据见[修订发布记录](版本发布记录-0.2.21-hcai(fix1).md)。当前不包含生产部署。

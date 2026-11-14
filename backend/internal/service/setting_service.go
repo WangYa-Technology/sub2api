@@ -6,13 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"golang.org/x/sync/singleflight"
-	"sync"
 )
 
 const (
@@ -122,6 +122,11 @@ type SettingService struct {
 	defaultSubGroupReader       DefaultSubscriptionGroupReader
 	proxyRepo                   ProxyRepository // for resolving websearch provider proxy URLs
 	cfg                         *config.Config
+	frontendInvalidation        *settingsInvalidation
+	forwardedIPRuntimeMu        sync.Mutex
+	webSearchRuntimeMu          sync.Mutex
+	webSearchRuntimeFingerprint string
+	webSearchRuntimeLoaded      bool
 	onUpdate                    func() // Callback when settings are updated (for cache invalidation)
 	version                     string // Application version
 	webSearchManagerBuilder     WebSearchManagerBuilder

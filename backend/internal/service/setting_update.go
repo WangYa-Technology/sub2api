@@ -93,6 +93,9 @@ func (s *SettingService) refreshCachedSettingsAfterWrite(ctx context.Context, se
 	stored, err := s.GetAllSettings(ctx)
 	if err != nil {
 		slog.Warn("refresh cached settings after partial update failed", "error", err)
+		if s.onUpdate != nil {
+			s.onUpdate()
+		}
 		return
 	}
 	s.refreshCachedSettings(stored)
@@ -801,7 +804,9 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 		accountSchedulingThresholdsCache.Store(&cachedAccountSchedulingThresholds{})
 	}
 	if s.cfg != nil {
+		s.forwardedIPRuntimeMu.Lock()
 		s.cfg.SetForwardedClientIPSettings(settings.APIKeyACLTrustForwardedIP, settings.ForwardedClientIPHeaders)
+		s.forwardedIPRuntimeMu.Unlock()
 	}
 	// codex_cli_only 加固策略缓存：设置更新后强制下次重载（涉及 4 个键 + JSON 解析，直接置过期）。
 	s.codexRestrictionPolicySF.Forget("codex_restriction_policy")

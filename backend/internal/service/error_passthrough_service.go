@@ -41,8 +41,10 @@ type ErrorPassthroughCache interface {
 
 // ErrorPassthroughService 错误透传规则服务
 type ErrorPassthroughService struct {
-	repo  ErrorPassthroughRepository
-	cache ErrorPassthroughCache
+	refreshMu  sync.Mutex
+	reconciler *cacheReconciler
+	repo       ErrorPassthroughRepository
+	cache      ErrorPassthroughCache
 
 	// 本地内存缓存，用于快速匹配
 	localCache   []*cachedPassthroughRule
@@ -80,11 +82,7 @@ func NewErrorPassthroughService(
 
 	// 订阅缓存更新通知
 	if cache != nil {
-		cache.SubscribeUpdates(ctx, func() {
-			if err := svc.refreshLocalCache(context.Background()); err != nil {
-				logger.LegacyPrintf("service.error_passthrough", "[ErrorPassthroughService] Failed to refresh cache on notification: %v", err)
-			}
-		})
+		svc.reconciler = startCacheReconciler("ErrorPassthroughService", cache, svc.reloadRulesFromDB, cacheReconcileInterval)
 	}
 
 	return svc
@@ -217,6 +215,11 @@ func (s *ErrorPassthroughService) refreshLocalCache(ctx context.Context) error {
 // 从数据库加载（repo.List 已按 priority 排序）
 // 注意：该方法会绕过 cache.Get，确保拿到数据库最新值。
 func (s *ErrorPassthroughService) reloadRulesFromDB(ctx context.Context) error {
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	rules, err := s.repo.List(ctx)
 	if err != nil {
 		return err
@@ -384,4 +387,11 @@ func (s *ErrorPassthroughService) containsAnyKeywordCached(bodyLower string, low
 		}
 	}
 	return false
+}
+
+// Stop releases the notification subscription and periodic DB reconciler.
+func (s *ErrorPassthroughService) Stop() {
+	if s != nil {
+		s.reconciler.stop()
+	}
 }

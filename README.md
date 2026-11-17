@@ -9,7 +9,7 @@
 ## 版本与仓库
 
 - 本仓库：[`WangYa-Technology/sub2api`](https://github.com/WangYa-Technology/sub2api)。
-- 当前源码版本：`0.2.21-hcai`，以 [VERSION](backend/cmd/server/VERSION) 为准。
+- 当前源码版本：`0.2.22-hcai`，以 [VERSION](backend/cmd/server/VERSION) 为准。
 - `dev`：开发和上游同步；`main`：通过 PR 合并的发布分支。
 - HCAI 发布版本使用 `-hcai` 后缀。上游同数字版本不是 HCAI 发行包，不能直接替换。
 
@@ -72,8 +72,8 @@ HCAI 不提供控制台在线更新、回滚或重启接口。版本检查信息
 
 ### 环境
 
-- Go：以 [backend/go.mod](backend/go.mod) 为准，当前为 `1.27.0`。
-- Node.js `22`、pnpm `11.10.0`：与 HCAI CI 保持一致。
+- Go：以 [backend/go.mod](backend/go.mod) 为准，当前为 `1.27.4`。
+- Node.js `22.23.4`、pnpm `11.10.0`：与 HCAI CI 保持一致。
 - 可用的 PostgreSQL 与 Redis，建议使用独立开发实例。
 
 ```bash

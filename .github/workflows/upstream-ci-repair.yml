@@ -74,4 +74,5 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
         run: bash .github/upstream-sync/push-repair.sh

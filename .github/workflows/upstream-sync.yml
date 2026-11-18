@@ -1,0 +1,81 @@
+name: HCAI upstream candidate
+
+on:
+  schedule:
+    - cron: '23 2 * * *'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Upstream release tag (empty means latest stable release)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hcai-upstream-candidate
+  cancel-in-progress: false
+
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache: true
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.10.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.23.4'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Select immutable upstream release
+        id: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_TAG: ${{ inputs.tag }}
+        run: bash .github/upstream-sync/prepare.sh
+      - name: Resolve conflicts and review HCAI behavior
+        if: steps.target.outputs.run == 'true'
+        uses: openai/codex-action@v1
+        env:
+          HCAI_VERSION: ${{ steps.target.outputs.version }}
+          UPSTREAM_SHA: ${{ steps.target.outputs.upstream_sha }}
+        with:
+          openai-api-key: ${{ secrets.CODEX_PROVIDER_KEY }}
+          responses-api-endpoint: ${{ vars.CODEX_RESPONSES_ENDPOINT }}
+          model: ${{ vars.CODEX_MODEL }}
+          effort: high
+          sandbox: workspace-write
+          allow-bots: true
+          prompt-file: .github/codex/upstream-merge.md
+      - name: Validate and commit merge
+        if: steps.target.outputs.run == 'true'
+        env:
+          HCAI_VERSION: ${{ steps.target.outputs.version }}
+          UPSTREAM_SHA: ${{ steps.target.outputs.upstream_sha }}
+        run: bash .github/upstream-sync/commit-candidate.sh
+      - uses: actions/create-github-app-token@v2
+        if: steps.target.outputs.run == 'true'
+        id: app
+        with:
+          app-id: ${{ vars.HCAI_AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.HCAI_AUTOMATION_APP_PRIVATE_KEY }}
+      - name: Push candidate and open PR
+        if: steps.target.outputs.run == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          HCAI_VERSION: ${{ steps.target.outputs.version }}
+          UPSTREAM_SHA: ${{ steps.target.outputs.upstream_sha }}
+          UPSTREAM_URL: ${{ steps.target.outputs.release_url }}
+          CANDIDATE_BRANCH: ${{ steps.target.outputs.branch }}
+        run: bash .github/upstream-sync/open-candidate.sh

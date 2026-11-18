@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo="${GITHUB_REPOSITORY:-WangYa-Technology/sub2api}"
+[[ "$repo" == WangYa-Technology/sub2api ]] || { echo 'Unexpected origin repository' >&2; exit 1; }
+git remote set-url origin "https://github.com/$repo.git"
+git remote add upstream https://github.com/Wei-Shaw/sub2api.git
+git fetch origin dev main --no-tags
+active="$(gh pr list --repo "$repo" --base dev --state open --json headRefName --jq '[.[].headRefName | select(startswith("chore/sync-upstream-"))] | length')"
+if [[ "$active" != 0 ]]; then
+  echo 'An upstream candidate PR is still open; finish it before starting another version' >&2
+  exit 1
+fi
+
+if [[ -n "${REQUESTED_TAG:-}" ]]; then
+  tag="$REQUESTED_TAG"
+else
+  tag="$(gh release view --repo Wei-Shaw/sub2api --json tagName --jq .tagName)"
+fi
+[[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Expected stable upstream tag: $tag" >&2; exit 1; }
+release="$(gh release view "$tag" --repo Wei-Shaw/sub2api --json url,isDraft,isPrerelease,tagName)"
+[[ "$(jq -r '.isDraft or .isPrerelease' <<<"$release")" == false ]] || { echo 'Release is draft or prerelease' >&2; exit 1; }
+git fetch upstream "refs/tags/$tag:refs/tags/hcai-upstream-$tag"
+upstream_sha="$(git rev-parse "refs/tags/hcai-upstream-$tag^{commit}")"
+version="${tag#v}-hcai"
+branch="chore/sync-upstream-${tag#v}"
+
+if git merge-base --is-ancestor "$upstream_sha" origin/dev; then
+  echo "Already integrated: $tag"
+  echo 'run=false' >> "$GITHUB_OUTPUT"
+  exit 0
+fi
+if gh pr list --repo "$repo" --state all --head "$branch" --json number --jq 'length' | grep -qv '^0$'; then
+  echo "Candidate already exists: $branch"
+  echo 'run=false' >> "$GITHUB_OUTPUT"
+  exit 0
+fi
+if git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
+  echo "Remote candidate exists: $branch" >&2
+  exit 1
+fi
+git switch -c "$branch" origin/dev
+printf 'HCAI dev=%s main=%s upstream=%s (%s)\n' "$(git rev-parse origin/dev)" "$(git rev-parse origin/main)" "$tag" "$upstream_sha"
+if git merge --no-commit --no-ff "$upstream_sha"; then
+  echo 'Merge has no textual conflicts'
+else
+  [[ -n "$(git ls-files -u)" ]] || { echo 'Merge failed without conflicts' >&2; exit 1; }
+  git diff --name-only --diff-filter=U
+fi
+{
+  echo 'run=true'
+  echo "version=$version"
+  echo "branch=$branch"
+  echo "upstream_sha=$upstream_sha"
+  echo "release_url=$(jq -r .url <<<"$release")"
+} >> "$GITHUB_OUTPUT"

@@ -1,0 +1,35 @@
+name: HCAI upstream PR progression
+
+on:
+  pull_request:
+    branches: [dev, main]
+    types: [closed]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: hcai-upstream-pr-progression
+  cancel-in-progress: false
+
+jobs:
+  progress:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/create-github-app-token@v2
+        id: app
+        with:
+          app-id: ${{ vars.HCAI_AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.HCAI_AUTOMATION_APP_PRIVATE_KEY }}
+      - name: Advance merged upstream PR
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: bash .github/upstream-sync/progress.sh

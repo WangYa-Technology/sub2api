@@ -8,7 +8,7 @@ git diff --quiet
 git diff --cached --quiet
 [[ "$(git ls-files --others --exclude-standard)" == .hcai-dev-main-pr.md ]] || { echo 'AI changed unexpected files' >&2; exit 1; }
 for heading in '## 更新范围' '## 功能影响' '## HCAI 定制影响' '## 验证与风险'; do
-  rg -Fxq "$heading" .hcai-dev-main-pr.md || { echo "Missing PR section: $heading" >&2; exit 1; }
+  grep -Fxq -- "$heading" .hcai-dev-main-pr.md || { echo "Missing PR section: $heading" >&2; exit 1; }
 done
 git fetch origin dev main
 [[ "$(git rev-parse origin/dev)" == "$DEV_SHA" ]] || { echo 'dev moved during AI review; wait for the next push run' >&2; exit 1; }

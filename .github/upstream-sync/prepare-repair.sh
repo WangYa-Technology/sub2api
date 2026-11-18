@@ -7,7 +7,7 @@ pr="$(gh pr list --head "$HEAD_BRANCH" --base dev --state open --json number,hea
 [[ "$(jq -r .headRefOid <<<"$pr")" == "$HEAD_SHA" ]] || exit 0
 version="${HEAD_BRANCH#chore/sync-upstream-}-hcai"
 git fetch origin dev "refs/heads/$HEAD_BRANCH:refs/remotes/origin/$HEAD_BRANCH"
-attempts="$(git log --first-parent --format=%s origin/dev.."origin/$HEAD_BRANCH" | rg -c '^test\(hcai\): repair upstream CI run ' || true)"
+attempts="$(git log --first-parent --format=%s origin/dev.."origin/$HEAD_BRANCH" | grep -c '^test(hcai): repair upstream CI run ' || true)"
 attempts="${attempts:-0}"
 if (( attempts >= 3 )); then
   echo "Three auto-repair attempts reached for $HEAD_BRANCH" >&2

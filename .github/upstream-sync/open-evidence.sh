@@ -12,11 +12,11 @@ for name in "版本发布记录-$HCAI_VERSION.md" "上游合并记录-$HCAI_VERS
 done
 # Codex edits the docs after this preparation step. This script is called again with COMMIT=1.
 if [[ "${COMMIT:-0}" != 1 ]]; then exit 0; fi
-[[ -z "$(git diff --name-only | rg -v '^docs/hcai-dev/.*\.md$')" ]] || { echo 'Evidence step changed non-document files' >&2; exit 1; }
-[[ -z "$(git diff --cached --name-only | rg -v '^docs/hcai-dev/.*\.md$')" ]] || { echo 'Evidence step staged non-document files' >&2; exit 1; }
-[[ -z "$(git ls-files --others --exclude-standard | rg -v '^docs/hcai-dev/.*\.md$')" ]] || { echo 'Evidence step added non-document files' >&2; exit 1; }
+[[ -z "$(git diff --name-only | grep -v '^docs/hcai-dev/.*\.md$')" ]] || { echo 'Evidence step changed non-document files' >&2; exit 1; }
+[[ -z "$(git diff --cached --name-only | grep -v '^docs/hcai-dev/.*\.md$')" ]] || { echo 'Evidence step staged non-document files' >&2; exit 1; }
+[[ -z "$(git ls-files --others --exclude-standard | grep -v '^docs/hcai-dev/.*\.md$')" ]] || { echo 'Evidence step added non-document files' >&2; exit 1; }
 git add -f "docs/hcai-dev/版本发布记录-$HCAI_VERSION.md" "docs/hcai-dev/上游合并记录-$HCAI_VERSION.md"
-[[ -z "$(git diff --cached --name-only | rg -v "^docs/hcai-dev/(版本发布记录|上游合并记录)-$HCAI_VERSION\\.md$")" ]] || { echo 'Only the two versioned records may be committed' >&2; exit 1; }
+[[ -z "$(git diff --cached --name-only | grep -Ev "^docs/hcai-dev/(版本发布记录|上游合并记录)-$HCAI_VERSION\\.md$")" ]] || { echo 'Only the two versioned records may be committed' >&2; exit 1; }
 git diff --cached --check
 git config user.name 'hcai-automation[bot]'
 git config user.email 'hcai-automation[bot]@users.noreply.github.com'

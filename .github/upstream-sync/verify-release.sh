@@ -25,10 +25,10 @@ cmp from-archive from-gzip
 [[ "$(file -b from-archive)" == *'ELF 64-bit'* ]]
 [[ "$(go version -m from-archive | sed -n 's/^\s*build\s*\s*vcs.revision=//p')" == "$main_sha" ]] || { echo 'Binary revision mismatch' >&2; exit 1; }
 [[ "$(go version -m from-archive | sed -n 's/^\s*build\s*\s*vcs.modified=//p')" == false ]] || exit 1
-rg -q "^version=$HCAI_VERSION$" BUILD_INFO.txt
-rg -q "^tag=$tag$" BUILD_INFO.txt
-rg -q "^commit=${main_sha:0:12}$" BUILD_INFO.txt
-rg -q '^target=linux_amd64$' BUILD_INFO.txt
+grep -q "^version=$HCAI_VERSION$" BUILD_INFO.txt
+grep -q "^tag=$tag$" BUILD_INFO.txt
+grep -q "^commit=${main_sha:0:12}$" BUILD_INFO.txt
+grep -q '^target=linux_amd64$' BUILD_INFO.txt
 {
   echo "Version: $HCAI_VERSION"
   echo "Release: $(jq -r .url <<<"$release")"

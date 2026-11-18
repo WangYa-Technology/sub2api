@@ -10,6 +10,7 @@ tag_sha="$(git rev-parse "$tag^{commit}")"
 [[ "$main_sha" == "$tag_sha" ]] || { echo 'Release tag does not point to main' >&2; exit 1; }
 [[ "$(git rev-parse origin/dev^{tree})" == "$(git rev-parse origin/main^{tree})" ]] || { echo 'dev/main contents differ before evidence' >&2; exit 1; }
 [[ "$(git show "$main_sha:backend/cmd/server/VERSION")" == "$HCAI_VERSION" ]] || exit 1
+expected_go="$(git show "$main_sha:backend/go.mod" | awk '$1 == "go" { print $2; exit }')"
 release="$(gh release view "$tag" --repo "$repo" --json isDraft,isPrerelease,assets,url)"
 [[ "$(jq -r '.isDraft or .isPrerelease' <<<"$release")" == false ]] || exit 1
 mkdir -p /tmp/hcai-release
@@ -24,7 +25,6 @@ gzip -dc sub2api-linux-amd64.gz > from-gzip
 cmp from-archive from-gzip
 [[ "$(file -b from-archive)" == *'ELF 64-bit'* ]]
 module_info="$(go version -m from-archive)"
-expected_go="$(git show "$main_sha:backend/go.mod" | awk '$1 == "go" { print $2; exit }')"
 [[ -n "$expected_go" && "$(awk 'NR == 1 { print $2 }' <<<"$module_info")" == "go$expected_go" ]] || { echo 'Binary Go version mismatch' >&2; exit 1; }
 for setting in 'GOOS=linux' 'GOARCH=amd64' "vcs.revision=$main_sha" 'vcs.modified=false'; do
   grep -Eq "^[[:space:]]*build[[:space:]]+$setting$" <<<"$module_info" || { echo "Binary build setting mismatch: $setting" >&2; exit 1; }

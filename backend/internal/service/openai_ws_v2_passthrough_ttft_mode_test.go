@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,6 +19,66 @@ import (
 type openAIWSTTFTModeTestEvent struct {
 	delay   time.Duration
 	payload string
+}
+
+// The capture connection otherwise starts the next turn's delays immediately
+// after completing the previous turn, before the client has sent its request.
+// Gate each turn on the actual upstream write so both timing origins agree.
+type openAIWSTTFTModeTestConn struct {
+	*openAIWSCaptureConn
+	requests      chan struct{}
+	readCount     int
+	eventsPerTurn int
+}
+
+func (c *openAIWSTTFTModeTestConn) WriteJSON(ctx context.Context, value any) error {
+	if err := c.openAIWSCaptureConn.WriteJSON(ctx, value); err != nil {
+		return err
+	}
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	if gjson.GetBytes(payload, "type").String() == "response.create" {
+		select {
+		case c.requests <- struct{}{}:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
+}
+
+func (c *openAIWSTTFTModeTestConn) ReadMessage(ctx context.Context) ([]byte, error) {
+	if c.readCount%c.eventsPerTurn == 0 {
+		select {
+		case <-c.requests:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	payload, err := c.openAIWSCaptureConn.ReadMessage(ctx)
+	if err == nil {
+		c.readCount++
+	}
+	return payload, err
+}
+
+func (c *openAIWSTTFTModeTestConn) ReadFrame(ctx context.Context) (coderws.MessageType, []byte, error) {
+	payload, err := c.ReadMessage(ctx)
+	return coderws.MessageText, payload, err
+}
+
+func (c *openAIWSTTFTModeTestConn) WriteFrame(ctx context.Context, _ coderws.MessageType, payload []byte) error {
+	return c.WriteJSON(ctx, json.RawMessage(payload))
+}
+
+type openAIWSTTFTModeTestDialer struct {
+	conn *openAIWSTTFTModeTestConn
+}
+
+func (d *openAIWSTTFTModeTestDialer) Dial(context.Context, string, http.Header, string) (openAIWSClientConn, int, http.Header, error) {
+	return d.conn, 0, nil, nil
 }
 
 // openAIWSTTFTModeTestTurn replays a reasoning turn: the reasoning item is
@@ -71,13 +132,16 @@ func runOpenAIWSPassthroughTTFTModeCase(t *testing.T, mode string) {
 
 	const reasoningDelay = 600 * time.Millisecond
 	const tolerance = 250 * time.Millisecond
-	// The second turn's events wait so its response.create is accepted first.
 	turns := [][]openAIWSTTFTModeTestEvent{
 		openAIWSTTFTModeTestTurn("resp_ttft_1", 0, reasoningDelay),
 		openAIWSTTFTModeTestTurn("resp_ttft_2", 200*time.Millisecond, reasoningDelay),
 	}
 
-	upstreamConn := &openAIWSCaptureConn{}
+	upstreamConn := &openAIWSTTFTModeTestConn{
+		openAIWSCaptureConn: &openAIWSCaptureConn{},
+		requests:            make(chan struct{}, len(turns)),
+		eventsPerTurn:       len(turns[0]),
+	}
 	for _, turn := range turns {
 		for _, event := range turn {
 			upstreamConn.events = append(upstreamConn.events, []byte(event.payload))
@@ -102,7 +166,7 @@ func runOpenAIWSPassthroughTTFTModeCase(t *testing.T, mode string) {
 		cache:                     &stubGatewayCache{},
 		openaiWSResolver:          NewOpenAIWSProtocolResolver(cfg),
 		toolCorrector:             NewCodexToolCorrector(),
-		openaiWSPassthroughDialer: &openAIWSCaptureDialer{conn: upstreamConn},
+		openaiWSPassthroughDialer: &openAIWSTTFTModeTestDialer{conn: upstreamConn},
 	}
 	account := &Account{
 		ID: 454, Name: "openai-ws-ttft-mode", Platform: PlatformOpenAI, Type: AccountTypeAPIKey,

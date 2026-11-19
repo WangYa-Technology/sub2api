@@ -20,7 +20,8 @@ if [[ "$base" == dev && "$head" =~ ^chore/sync-upstream-([0-9]+\.[0-9]+\.[0-9]+)
   gh pr create --repo "$repo" --base main --head dev --title "hcai(release): $version" --body "Release $version from dev. Review the versioned merge record, predeploy review, migration and rollback notes. Requires final Backend/Frontend checks and CODEOWNER approval. No production deployment."
   bash .github/upstream-sync/enable-auto-merge.sh dev main
 elif [[ "$base" == dev && "$head" =~ ^chore/release-evidence-([0-9]+\.[0-9]+\.[0-9]+)(-hcai\(fix[1-9][0-9]*\))?$ ]]; then
-  version="${BASH_REMATCH[1]}-hcai${BASH_REMATCH[2]}"
+  version="${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
+  [[ -n "${BASH_REMATCH[2]}" ]] || version+="-hcai"
   [[ "$title" == "hcai(docs): $version release evidence" ]] || exit 1
   [[ -z "$(gh pr diff "$PR_NUMBER" --repo "$repo" --name-only | grep -v '^docs/hcai-dev/.*\.md$')" ]] || exit 1
   [[ -z "$(gh pr list --repo "$repo" --head dev --base main --state open --json number --jq '.[0].number // empty')" ]] || { echo 'dev -> main PR already open' >&2; exit 1; }

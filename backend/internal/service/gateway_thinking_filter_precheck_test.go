@@ -82,7 +82,11 @@ func TestFilterThinkingBlocksSignedHistorySkipsDecode(t *testing.T) {
 			t.Fatal("valid signed history must be returned unchanged")
 		}
 	})
-	require.Less(t, allocs, float64(16), "allocs: %v", allocs)
+	decodedAllocs := testing.AllocsPerRun(5, func() {
+		_ = filterThinkingBlocksDecoded(body, false)
+	})
+	require.Greater(t, decodedAllocs, float64(0))
+	require.Less(t, allocs, decodedAllocs/10, "precheck allocs: %v, decoded allocs: %v", allocs, decodedAllocs)
 }
 
 func FuzzThinkingBlocksNeedFiltering(f *testing.F) {

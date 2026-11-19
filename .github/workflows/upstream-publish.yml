@@ -1,0 +1,69 @@
+name: HCAI upstream publish progression
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: HCAI version, e.g. 0.2.23-hcai
+        required: true
+        type: string
+      stage:
+        description: Release verification step
+        required: true
+        type: choice
+        options:
+          - verify-release
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+concurrency:
+  group: hcai-upstream-publish
+  cancel-in-progress: false
+
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache: true
+      - name: Verify official Release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HCAI_VERSION: ${{ inputs.version }}
+        run: bash .github/upstream-sync/verify-release.sh
+      - name: Prepare evidence branch
+        env:
+          HCAI_VERSION: ${{ inputs.version }}
+        run: bash .github/upstream-sync/open-evidence.sh
+      - name: Record verified evidence
+        uses: openai/codex-action@v1
+        env:
+          HCAI_VERSION: ${{ inputs.version }}
+        with:
+          openai-api-key: ${{ secrets.CODEX_PROVIDER_KEY }}
+          responses-api-endpoint: ${{ vars.CODEX_RESPONSES_ENDPOINT }}
+          model: ${{ vars.CODEX_MODEL }}
+          effort: high
+          sandbox: workspace-write
+          prompt-file: .github/codex/release-evidence.md
+      - uses: actions/create-github-app-token@v2
+        id: app
+        with:
+          app-id: ${{ vars.HCAI_AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.HCAI_AUTOMATION_APP_PRIVATE_KEY }}
+      - name: Open release evidence PR
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          HCAI_VERSION: ${{ inputs.version }}
+          COMMIT: '1'
+        run: bash .github/upstream-sync/open-evidence.sh

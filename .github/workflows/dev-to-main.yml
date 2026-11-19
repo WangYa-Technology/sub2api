@@ -1,0 +1,51 @@
+name: HCAI dev to main
+
+on:
+  push:
+    branches: [dev]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: hcai-dev-to-main
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check dev update
+        id: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEV_SHA: ${{ github.sha }}
+        run: bash .github/upstream-sync/prepare-dev-promotion.sh
+      - name: Review local dev update
+        if: steps.target.outputs.run == 'true'
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.CODEX_PROVIDER_KEY }}
+          responses-api-endpoint: ${{ vars.CODEX_RESPONSES_ENDPOINT }}
+          model: ${{ vars.CODEX_MODEL }}
+          effort: high
+          sandbox: workspace-write
+          prompt-file: .github/codex/dev-to-main.md
+      - uses: actions/create-github-app-token@v2
+        if: steps.target.outputs.run == 'true'
+        id: app
+        with:
+          app-id: ${{ vars.HCAI_AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.HCAI_AUTOMATION_APP_PRIVATE_KEY }}
+      - name: Open or update dev to main PR
+        if: steps.target.outputs.run == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          DEV_SHA: ${{ github.sha }}
+        run: bash .github/upstream-sync/open-dev-promotion.sh

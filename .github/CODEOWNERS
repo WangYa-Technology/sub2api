@@ -1,6 +1,6 @@
 # Required reviewers for application and release changes.
-* @HeLongaa @gy68456
-.github/ @HeLongaa @gy68456
-backend/ @HeLongaa @gy68456
-frontend/ @HeLongaa @gy68456
-deploy/ @HeLongaa @gy68456
+* @HeLongaa
+.github/ @HeLongaa
+backend/ @HeLongaa
+frontend/ @HeLongaa
+deploy/ @HeLongaa

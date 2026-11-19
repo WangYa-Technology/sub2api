@@ -36,6 +36,7 @@ jobs:
           model: ${{ vars.CODEX_MODEL }}
           effort: high
           sandbox: workspace-write
+          allow-bots: true
           prompt-file: .github/codex/dev-to-main.md
       - uses: actions/create-github-app-token@v2
         if: steps.target.outputs.run == 'true'

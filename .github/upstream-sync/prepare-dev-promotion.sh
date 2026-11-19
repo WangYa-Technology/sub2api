@@ -12,7 +12,7 @@ fi
 
 # Upstream candidates and release evidence have their own merged-PR progression.
 prs="$(gh api "repos/$repo/commits/$DEV_SHA/pulls" --paginate)"
-if jq -e --arg sha "$DEV_SHA" '[.[] | select(.merge_commit_sha == $sha and .merged_at != null and (.head.ref | test("^chore/(sync-upstream|release-evidence)-[0-9]+\\.[0-9]+\\.[0-9]+$")))] | length > 0' <<<"$prs" >/dev/null; then
+if jq -e --arg sha "$DEV_SHA" '[.[] | select(.merge_commit_sha == $sha and .merged_at != null and (.head.ref | test("^chore/sync-upstream-[0-9]+\\.[0-9]+\\.[0-9]+$|^chore/release-evidence-[0-9]+\\.[0-9]+\\.[0-9]+(-hcai\\(fix[1-9][0-9]*\\))?$")))] | length > 0' <<<"$prs" >/dev/null; then
   echo 'Specialized upstream PR progression owns this push'
   exit 0
 fi

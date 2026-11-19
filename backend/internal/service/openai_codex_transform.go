@@ -298,16 +298,19 @@ func applyCodexOAuthTransformWithOptions(reqBody map[string]any, opts codexOAuth
 	}
 
 	// ChatGPT internal Codex endpoint does not accept role:"system".
-	// Mirror its text into instructions because Codex OAuth requires it. Some
-	// callers must also keep the guidance in input as developer (notably
-	// Responses JSON object mode), while Chat Completions compatibility can
-	// omit text-only messages after promoting them losslessly.
-	if extractSystemMessagesFromInput(reqBody, opts.OmitPromotedSystemMessagesFromInput) {
+	// GPT-6.2 keeps stable guidance in input for caching. Older models retain
+	// the existing promotion to top-level instructions.
+	isGPT62 := isGPT62CodexModel(normalizedModel)
+	if isGPT62 && !opts.IsCompact {
+		if convertSystemMessagesToDeveloper(reqBody) {
+			result.Modified = true
+		}
+	} else if extractSystemMessagesFromInput(reqBody, opts.OmitPromotedSystemMessagesFromInput) {
 		result.Modified = true
 	}
 
 	// instructions 处理逻辑：根据是否是 Codex CLI 分别调用不同方法
-	if !opts.SkipDefaultInstructions && applyInstructions(reqBody, opts.IsCodexCLI) {
+	if (!isGPT62 || opts.IsCompact) && !opts.SkipDefaultInstructions && applyInstructions(reqBody, opts.IsCodexCLI) {
 		result.Modified = true
 	}
 	if isCodexSparkModel(normalizedModel) && applyCodexSparkImageUnsupportedInstructions(reqBody) {
@@ -350,6 +353,9 @@ func applyCodexOAuthTransformWithOptions(reqBody map[string]any, opts codexOAuth
 		} else {
 			reqBody["input"] = []any{}
 		}
+		result.Modified = true
+	}
+	if isGPT62 && !opts.IsCompact && applyGPT62CodexInstructions(reqBody, !opts.SkipDefaultInstructions) {
 		result.Modified = true
 	}
 
@@ -1369,6 +1375,70 @@ func extractSystemMessagesFromInput(reqBody map[string]any, omitPromoted bool) b
 	} else {
 		reqBody["instructions"] = extracted
 	}
+	return true
+}
+
+func isGPT62CodexModel(model string) bool {
+	key := codexModelLookupKey(model)
+	for _, base := range []string{"gpt-6.2-sol", "gpt-6.2-astra"} {
+		if key == base {
+			return true
+		}
+		if suffix, ok := strings.CutPrefix(key, base+"-"); ok && (isKnownCodexModelSuffix(suffix) || suffix == "max" || suffix == "openai-compact") {
+			return true
+		}
+	}
+	return false
+}
+
+func convertSystemMessagesToDeveloper(reqBody map[string]any) bool {
+	input, ok := reqBody["input"].([]any)
+	if !ok {
+		return false
+	}
+	modified := false
+	for _, item := range input {
+		if message, ok := item.(map[string]any); ok && message["role"] == "system" {
+			message["role"] = "developer"
+			modified = true
+		}
+	}
+	return modified
+}
+
+func applyGPT62CodexInstructions(reqBody map[string]any, injectDefault bool) bool {
+	instructions, valid := reqBody["instructions"].(string)
+	modified := false
+	if !valid {
+		// ChatGPT's Codex endpoint requires the field even when guidance is in input.
+		reqBody["instructions"] = ""
+		modified = true
+	}
+	if !injectDefault || strings.TrimSpace(instructions) != "" {
+		return modified
+	}
+	input, ok := reqBody["input"].([]any)
+	if !ok {
+		return modified
+	}
+	if len(input) > 0 {
+		if first, ok := input[0].(map[string]any); ok && first["role"] == "developer" {
+			return modified
+		}
+	}
+	model, _ := reqBody["model"].(string)
+	return prependCodexDeveloperInstruction(reqBody, defaultCodexSynthInstructions(model))
+}
+
+func prependCodexDeveloperInstruction(reqBody map[string]any, instruction string) bool {
+	input, ok := reqBody["input"].([]any)
+	if !ok || strings.TrimSpace(instruction) == "" {
+		return false
+	}
+	developer := map[string]any{"type": "message", "role": "developer", "content": []any{
+		map[string]any{"type": "input_text", "text": instruction},
+	}}
+	reqBody["input"] = append([]any{developer}, input...)
 	return true
 }
 

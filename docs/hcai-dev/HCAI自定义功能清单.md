@@ -1,5 +1,9 @@
 # HCAI 自定义功能与内容清单
 
+## GPT-6.2 指令缓存修复（2026-11-19，本地未提交）
+
+针对上游 [issue #8930](https://github.com/Wei-Shaw/sub2api/issues/8930)，本地 `dev` 基线新增 GPT-6.2 Sol/Astra 的 OAuth 指令放置修复：稳定默认指令与 `system` 内容保留在 `input` 的 `developer` 消息，已有首条 `developer` 时不重复注入；Messages 强制模板也放在首条 `developer`。客户端显式顶层指令、旧模型、原生 API Key 和无默认注入的 GPT-6.2 透传保持各自路径。只验证本地出站请求体，尚未验证真实 OAuth 缓存与计费；0.2.22-hcai 未内置 GPT-6.2 模型目录，不能据此宣称已正式支持或上线。实现与验证边界见[修复记录](GPT-6.2指令缓存修复-2026-11-19.md)。
+
 ## 自动化治理增量（2026-11-18）
 
 本轮仅新增 `.github/` 的上游合并、CI 修复、`dev → main` 晋级和发行证据流程，并修正 CODEOWNERS；backend、frontend、deploy、迁移和 VERSION 均无本轮应用改动。HCAI 功能行为仍以 0.2.22-hcai 基线为准，未来 0.2.23 候选须重新逐项审查。AI 审查与 App 建 PR 已在远程演练，实际 CODEOWNER 审核、自动合并和发行证据尚待验证，见[自动化实现记录](上游同步自动化实现-2026-11-18.md)。

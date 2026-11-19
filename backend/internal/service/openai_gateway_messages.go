@@ -247,13 +247,20 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		if strings.TrimSpace(existingInstructions) == "" {
 			existingInstructions = extractPromptLikeInstructionsFromInput(reqBody)
 		}
-		if _, err := applyForcedCodexInstructionsTemplate(reqBody, forcedTemplateText, forcedCodexInstructionsTemplateData{
+		templateData := forcedCodexInstructionsTemplateData{
 			ExistingInstructions: strings.TrimSpace(existingInstructions),
 			OriginalModel:        originalModel,
 			NormalizedModel:      normalizedModel,
 			BillingModel:         billingModel,
 			UpstreamModel:        templateUpstreamModel,
-		}); err != nil {
+		}
+		if isGPT62CodexModel(templateUpstreamModel) {
+			rendered, renderErr := renderForcedCodexInstructionsTemplate(forcedTemplateText, templateData)
+			if renderErr != nil {
+				return nil, renderErr
+			}
+			prependCodexDeveloperInstruction(reqBody, rendered)
+		} else if _, err := applyForcedCodexInstructionsTemplate(reqBody, forcedTemplateText, templateData); err != nil {
 			return nil, err
 		}
 		ensureCodexOAuthInstructionsField(reqBody)

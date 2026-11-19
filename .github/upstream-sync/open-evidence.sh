@@ -16,7 +16,11 @@ if [[ "${COMMIT:-0}" != 1 ]]; then exit 0; fi
 [[ -z "$(git -c core.quotePath=false diff --cached --name-only | grep -v '^docs/hcai-dev/.*\.md$')" ]] || { echo 'Evidence step staged non-document files' >&2; exit 1; }
 [[ -z "$(git -c core.quotePath=false ls-files --others --exclude-standard | grep -v '^docs/hcai-dev/.*\.md$')" ]] || { echo 'Evidence step added non-document files' >&2; exit 1; }
 git add -f "docs/hcai-dev/版本发布记录-$HCAI_VERSION.md" "docs/hcai-dev/上游合并记录-$HCAI_VERSION.md"
-[[ -z "$(git -c core.quotePath=false diff --cached --name-only | grep -Ev "^docs/hcai-dev/(版本发布记录|上游合并记录)-$HCAI_VERSION\\.md$")" ]] || { echo 'Only the two versioned records may be committed' >&2; exit 1; }
+allowed_release="docs/hcai-dev/版本发布记录-$HCAI_VERSION.md"
+allowed_merge="docs/hcai-dev/上游合并记录-$HCAI_VERSION.md"
+while IFS= read -r -d '' path; do
+  [[ "$path" == "$allowed_release" || "$path" == "$allowed_merge" ]] || { echo "Unexpected staged file: $path" >&2; exit 1; }
+done < <(git diff --cached --name-only -z)
 git diff --cached --check
 git config user.name 'hcai-automation[bot]'
 git config user.email 'hcai-automation[bot]@users.noreply.github.com'

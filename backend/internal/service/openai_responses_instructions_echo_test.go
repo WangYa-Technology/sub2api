@@ -147,6 +147,103 @@ func TestOpenAIGatewayService_OAuthPassthrough_MissingInstructionsForwardedWitho
 	require.Equal(t, gjson.Null, sseResponseInstructions(t, rec.Body.String(), "response.completed").Type)
 }
 
+func TestOpenAIGatewayService_OAuthPassthrough_GPT62DoesNotInjectInstructions(t *testing.T) {
+	for _, model := range []string{"gpt-6.2-sol", "gpt-6.2-astra"} {
+		t.Run(model, func(t *testing.T) {
+			upstream := instructionsEchoUpstream("null")
+			result, rec, err := instructionsEchoForward(t, instructionsEchoOAuthAccount(true), upstream,
+				`{"model":"`+model+`","stream":true,"input":[{"type":"message","role":"developer","content":"stable guidance"},{"type":"message","role":"user","content":"Hi"}]}`)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Equal(t, http.StatusOK, rec.Code)
+			require.False(t, gjson.GetBytes(upstream.lastBody, "instructions").Exists())
+			require.Equal(t, "stable guidance", gjson.GetBytes(upstream.lastBody, "input.0.content").String())
+		})
+	}
+}
+
+func TestOpenAIGatewayService_GPT62CodexInstructionsPlacement(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		body       string
+		wantFirst  string
+		wantLength int
+		wantTop    string
+	}{
+		{
+			name:      "existing developer remains cacheable",
+			body:      `{"model":"gpt-6.2-sol","stream":true,"input":[{"type":"message","role":"developer","content":"client guidance"},{"type":"message","role":"user","content":"Hi"}]}`,
+			wantFirst: "client guidance", wantLength: 2, wantTop: "",
+		},
+		{
+			name:      "missing developer gets default prefix",
+			body:      `{"model":"gpt-6.2-astra","stream":true,"input":[{"type":"message","role":"user","content":"Hi"}]}`,
+			wantFirst: defaultCodexSynthInstructions("gpt-6.2-astra"), wantLength: 2, wantTop: "",
+		},
+		{
+			name:      "explicit turn instructions preserved",
+			body:      `{"model":"gpt-6.2-sol","stream":true,"instructions":"turn only","input":[{"type":"message","role":"developer","content":"client guidance"},{"type":"message","role":"user","content":"Hi"}]}`,
+			wantFirst: "client guidance", wantLength: 2, wantTop: "turn only",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			upstream := instructionsEchoUpstream(`"ok"`)
+			result, rec, err := instructionsEchoForward(t, instructionsEchoOAuthAccount(false), upstream, tt.body)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Equal(t, http.StatusOK, rec.Code)
+			require.Equal(t, tt.wantTop, gjson.GetBytes(upstream.lastBody, "instructions").String())
+			input := gjson.GetBytes(upstream.lastBody, "input").Array()
+			require.Len(t, input, tt.wantLength)
+			require.Equal(t, "developer", input[0].Get("role").String())
+			content := input[0].Get("content")
+			if content.IsArray() {
+				content = content.Array()[0].Get("text")
+			}
+			require.Equal(t, tt.wantFirst, content.String())
+		})
+	}
+}
+
+func TestApplyCodexOAuthTransform_GPT62SystemAndLegacyInstructions(t *testing.T) {
+	body := map[string]any{
+		"model": "gpt-6.2-sol",
+		"input": []any{
+			map[string]any{"type": "message", "role": "system", "content": "stable guidance"},
+			map[string]any{"type": "message", "role": "user", "content": "Hi"},
+		},
+	}
+	result := applyCodexOAuthTransform(body, false, false)
+	require.NoError(t, result.Error)
+	require.Equal(t, "", body["instructions"])
+	input := body["input"].([]any)
+	require.Len(t, input, 2)
+	require.Equal(t, "developer", input[0].(map[string]any)["role"])
+	require.Equal(t, "stable guidance", input[0].(map[string]any)["content"])
+
+	legacy := map[string]any{"model": "gpt-6.1-sol", "input": []any{map[string]any{"type": "message", "role": "user", "content": "Hi"}}}
+	result = applyCodexOAuthTransform(legacy, false, false)
+	require.NoError(t, result.Error)
+	require.Equal(t, defaultCodexSynthInstructions("gpt-6.1-sol"), legacy["instructions"])
+	require.Len(t, legacy["input"], 1)
+}
+
+func TestIsGPT62CodexModel(t *testing.T) {
+	for _, model := range []string{"gpt-6.2-sol", "gpt-6.2-astra", "openai/gpt-6.2-sol-high", "gpt-6.2-sol-max", "gpt-6.2-astra-openai-compact"} {
+		require.True(t, isGPT62CodexModel(model), model)
+	}
+	for _, model := range []string{"gpt-6.1-sol", "gpt-6.2-solitude", "gpt-6.2-sol-preview", "gpt-6.2-astra-2026-11-17"} {
+		require.False(t, isGPT62CodexModel(model), model)
+	}
+}
+
+func TestApplyCodexOAuthTransform_GPT62CompactKeepsInstructions(t *testing.T) {
+	body := map[string]any{"model": "gpt-6.2-sol", "input": []any{map[string]any{"type": "message", "role": "user", "content": "Summarize"}}}
+	result := applyCodexOAuthTransform(body, false, true)
+	require.NoError(t, result.Error)
+	require.Equal(t, defaultCodexSynthInstructions("gpt-6.2-sol"), body["instructions"])
+}
+
 func TestOpenAIGatewayService_OAuthPassthrough_InjectedCodexInstructionsEchoRestored(t *testing.T) {
 	upstream := instructionsEchoUpstream(`"` + instructionsEchoMarker + `"`)
 	result, rec, err := instructionsEchoForward(t, instructionsEchoOAuthAccount(true), upstream,

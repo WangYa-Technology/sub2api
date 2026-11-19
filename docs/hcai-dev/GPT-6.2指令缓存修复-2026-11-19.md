@@ -6,7 +6,7 @@
 
 [上游 issue #8930](https://github.com/Wei-Shaw/sub2api/issues/8930) 报告 GPT-6.2 的顶层 `instructions` 按未缓存输入计费。[OpenAI 文档](https://developers.openai.com/api/docs/guides/keep-prefix-unchanged)建议把可复用开发者指令放入 `input` 首个 `developer` 消息，顶层字段留给回合指令。旧转发在缺少该字段时注入长默认指令，且会把 `system` 文本提升到顶层。issue 的约 5.4k token 增量是上游用户在 v0.2.23 的测量，不是 HCAI 生产实测。
 
-修改范围：`openai_codex_transform.go`、`openai_gateway_forward.go`、`openai_gateway_messages.go` 及对应测试。仅对 `gpt-6.2-sol` / `gpt-6.2-astra`（含既有合法 effort、`max`、`openai-compact` 与日期后缀）启用新逻辑；0.2.22 当前未内置 GPT-6.2 映射，待上游 0.2.23 合并后重新核对模型目录与专属默认指令。
+修改范围：`openai_codex_transform.go`、`openai_gateway_forward.go`、`openai_gateway_messages.go` 及对应测试。仅对 `gpt-6.2-sol` / `gpt-6.2-astra`（含上游定义的 effort、`max` 与 `openai-compact` 后缀）启用新逻辑；0.2.22 当前未内置 GPT-6.2 映射，待上游 0.2.23 合并后重新核对模型目录与专属默认指令。
 
 ## 本地实现行为
 
@@ -27,3 +27,7 @@
 | `pnpm --dir frontend install --frozen-lockfile`、`lint:check`、`typecheck`、`test:run`、`build` | 全部通过；前端测试 395 个文件、3209 项 |
 
 **尚未验证**：真实 ChatGPT/Codex OAuth 上游是否接受空顶层字段与首条 `developer`、连续回合 `cached_tokens` 是否增加、实际输入计费和回答质量。未使用生产凭据或发付费请求。上述真实验收及 0.2.23 合并后的重测完成前，不据此放行 GPT-6.2 OAuth 普通转发；回退方式为恢复该修复提交前的指令转换行为，并暂不开放 GPT-6.2。
+
+## 0.2.23 合并后补充
+
+上述“未提交/待合并”是修复初始阶段的记录。修复已于 `2438ff3422d96a6a3c6fe6b87c1a8eae3fbfb59f` 提交并进入 `0.2.23-hcai(fix1)` 合并候选。上游现提供 `openai.GPT62ModelID` 与 Sol/Astra 模型目录，HCAI 识别函数已复用该接口，不再自行接受日期后缀。合并后的定向测试、全量验证及正式发行状态见[0.2.23 合并记录](上游合并记录-0.2.23-hcai(fix1).md)和[发布记录](版本发布记录-0.2.23-hcai(fix1).md)；真实 OAuth 缓存命中与计费仍未验证。

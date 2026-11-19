@@ -229,10 +229,10 @@ func TestApplyCodexOAuthTransform_GPT62SystemAndLegacyInstructions(t *testing.T)
 }
 
 func TestIsGPT62CodexModel(t *testing.T) {
-	for _, model := range []string{"gpt-6.2-sol", "gpt-6.2-astra", "openai/gpt-6.2-sol-high", "gpt-6.2-astra-2026-11-17", "gpt-6.2-sol-max", "gpt-6.2-astra-openai-compact"} {
+	for _, model := range []string{"gpt-6.2-sol", "gpt-6.2-astra", "openai/gpt-6.2-sol-high", "gpt-6.2-sol-max", "gpt-6.2-astra-openai-compact"} {
 		require.True(t, isGPT62CodexModel(model), model)
 	}
-	for _, model := range []string{"gpt-6.1-sol", "gpt-6.2-solitude", "gpt-6.2-sol-preview"} {
+	for _, model := range []string{"gpt-6.1-sol", "gpt-6.2-solitude", "gpt-6.2-sol-preview", "gpt-6.2-astra-2026-11-17"} {
 		require.False(t, isGPT62CodexModel(model), model)
 	}
 }

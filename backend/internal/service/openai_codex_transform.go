@@ -13,6 +13,8 @@ import (
 )
 
 var codexModelMap = map[string]string{
+	"gpt-6.2-sol":          "gpt-6.2-sol",
+	"gpt-6.2-astra":        "gpt-6.2-astra",
 	"gpt-6.1-terra":        "gpt-6.1-terra",
 	"gpt-6.1-sol":          "gpt-6.1-sol",
 	"gpt-6-sol":            "gpt-6-sol",
@@ -67,6 +69,8 @@ var codexVersionModelPrefixes = []struct {
 	target string
 }{
 	{prefix: "gpt-6.1-terra", target: "gpt-6.1-terra"},
+	{prefix: "gpt-6.2-sol", target: "gpt-6.2-sol"},
+	{prefix: "gpt-6.2-astra", target: "gpt-6.2-astra"},
 	{prefix: "gpt-6.1-sol", target: "gpt-6.1-sol"},
 	{prefix: "gpt-6-sol", target: "gpt-6-sol"},
 	{prefix: "gpt-6-luna", target: "gpt-6-luna"},
@@ -1379,16 +1383,7 @@ func extractSystemMessagesFromInput(reqBody map[string]any, omitPromoted bool) b
 }
 
 func isGPT62CodexModel(model string) bool {
-	key := codexModelLookupKey(model)
-	for _, base := range []string{"gpt-6.2-sol", "gpt-6.2-astra"} {
-		if key == base {
-			return true
-		}
-		if suffix, ok := strings.CutPrefix(key, base+"-"); ok && (isKnownCodexModelSuffix(suffix) || suffix == "max" || suffix == "openai-compact") {
-			return true
-		}
-	}
-	return false
+	return openai.GPT62ModelID(model) != ""
 }
 
 func convertSystemMessagesToDeveloper(reqBody map[string]any) bool {

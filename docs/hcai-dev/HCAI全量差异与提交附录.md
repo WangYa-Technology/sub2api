@@ -1,5 +1,9 @@
 # HCAI 全量差异和提交附录
 
+## 0.2.23-hcai(fix1) 新基线（2026-11-19）
+
+上游正式标签解析提交 `5af9afb588c4b014b3df9db7d4073af1f8ae01b6`，合并前远程 dev 为 `fe49e19c58b6a5aa8bead0d966eb3cd2c914e5b0`；本地 HCAI GPT-6.2 修复提交 `2438ff3422d96a6a3c6fe6b87c1a8eae3fbfb59f` 作为合并第一父。11 个旧定制路径与上游更新交叉；完整非文档净差异的可复现命令、交叉路径见[0.2.23 净差异清单](上游净差异清单-0.2.23-hcai(fix1).md)，冲突、语义审查和迁移见[合并记录](上游合并记录-0.2.23-hcai(fix1).md)。下方“本地未提交”描述保留为修复初始阶段的历史状态；当前候选状态以上述记录和[发布记录](版本发布记录-0.2.23-hcai(fix1).md)为准。
+
 ## GPT-6.2 指令缓存本地增量（2026-11-19）
 
 以 `dev` 的 `fe49e19c58b6a5aa8bead0d966eb3cd2c914e5b0` 为本地修复基线，新增 HCAI 网关行为差异：`backend/internal/service/openai_codex_transform.go`、`openai_gateway_forward.go`、`openai_gateway_messages.go` 及两份对应测试（`openai_responses_instructions_echo_test.go`、`openai_compat_model_test.go`）。该差异尚未提交、未进入正式 0.2.22-hcai Release，也不替代下方 0.2.22 全量净差异快照；后续合并上游 0.2.23 时按[修复记录](GPT-6.2指令缓存修复-2026-11-19.md)逐路径保留或判断是否被上游吸收。

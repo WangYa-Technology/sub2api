@@ -2,7 +2,7 @@
 set -euo pipefail
 repo="$GITHUB_REPOSITORY"
 tag="v$HCAI_VERSION"
-[[ "$HCAI_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-hcai$ ]] || exit 1
+[[ "$HCAI_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-hcai(\(fix[1-9][0-9]*\))?$ ]] || exit 1
 [[ -z "$(gh pr list --repo "$repo" --base main --head dev --state open --json number --jq '.[0].number // empty')" ]] || { echo 'main PR still open' >&2; exit 1; }
 git fetch origin dev main "refs/tags/$tag:refs/tags/$tag"
 main_sha="$(git rev-parse origin/main)"

@@ -23,14 +23,14 @@ elif [[ "$base" == dev && "$head" =~ ^chore/release-evidence-([0-9]+\.[0-9]+\.[0
   version="${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
   [[ -n "${BASH_REMATCH[2]}" ]] || version+="-hcai"
   [[ "$title" == "hcai(docs): $version release evidence" ]] || exit 1
-  [[ -z "$(gh pr diff "$PR_NUMBER" --repo "$repo" --name-only | grep -v '^docs/hcai-dev/.*\.md$')" ]] || exit 1
+  [[ -z "$(gh pr view "$PR_NUMBER" --repo "$repo" --json files --jq '.files[].path' | grep -v '^docs/hcai-dev/.*\.md$')" ]] || exit 1
   [[ -z "$(gh pr list --repo "$repo" --head dev --base main --state open --json number --jq '.[0].number // empty')" ]] || { echo 'dev -> main PR already open' >&2; exit 1; }
   gh pr create --repo "$repo" --base main --head dev --title "hcai(docs): $version release evidence" --body "Pure Markdown release evidence for $version. Final CI and CODEOWNER approval required. Production deployment remains separate."
   bash .github/upstream-sync/enable-auto-merge.sh dev main
 elif [[ "$base" == main && "$head" == dev && "$title" =~ ^hcai\(docs\):\ ([0-9]+\.[0-9]+\.[0-9]+-hcai(\(fix[1-9][0-9]*\))?)\ release\ evidence$ ]]; then
   version="${BASH_REMATCH[1]}"
   tag="v$version"
-  [[ -z "$(gh pr diff "$PR_NUMBER" --repo "$repo" --name-only | grep -v '\.md$')" ]] || exit 1
+  [[ -z "$(gh pr view "$PR_NUMBER" --repo "$repo" --json files --jq '.files[].path' | grep -v '\.md$')" ]] || exit 1
   git fetch origin dev main
   [[ "$(git rev-parse origin/dev^{tree})" == "$(git rev-parse origin/main^{tree})" ]] || { echo 'dev/main trees differ; retain temporary branches' >&2; exit 1; }
   gh release view "$tag" --repo "$repo" >/dev/null

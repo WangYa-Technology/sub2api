@@ -40,6 +40,8 @@ if git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
   exit 1
 fi
 git switch -c "$branch" origin/dev
+git config user.name 'hcai-automation[bot]'
+git config user.email 'hcai-automation[bot]@users.noreply.github.com'
 printf 'HCAI dev=%s main=%s upstream=%s (%s)\n' "$(git rev-parse origin/dev)" "$(git rev-parse origin/main)" "$tag" "$upstream_sha"
 if git merge --no-commit --no-ff "$upstream_sha"; then
   echo 'Merge has no textual conflicts'

@@ -83,4 +83,4 @@ jobs:
           UPSTREAM_SHA: ${{ steps.target.outputs.upstream_sha }}
           UPSTREAM_URL: ${{ steps.target.outputs.release_url }}
           CANDIDATE_BRANCH: ${{ steps.target.outputs.branch }}
-        run: bash .github/upstream-sync/open-candidate.sh
+        run: bash <(git show "$GITHUB_SHA:.github/upstream-sync/open-candidate.sh")

@@ -1,5 +1,13 @@
 # HCAI 全量差异和提交附录
 
+## 0.2.24-hcai 待提交新基线（2026-11-21）
+
+上游 v0.2.24 固定 SHA `5c2982a81b46e2142d0143d2f83c1ce9c4da1d24`，第一父 origin/dev `953645ea6c099ab059e00d8acb8a08fbb588c424`，共同祖先 v0.2.23 `5af9afb588c4b014b3df9db7d4073af1f8ae01b6`。当前双亲 merge pending，尚无新合并提交、PR 或 Release 证据。
+
+相对上游完整非 docs 净差异 446 条、相对第一父应用/工程变化 192 条（含缓存与 DB-only 刷新语义修复及回归），30 条旧定制交叉路径在[本版完整净差异](上游净差异清单-0.2.24-hcai.md)逐一列出；附录不省略测试、生成文件、删除路径或锁文件。保留 12 个 HCAI 专属完整 SQL 文件，第一父 317 个 SQL 全部不变；无迁移/依赖升级。
+
+新增 HCAI 适配为 backend/internal/service/ops_token_stats_cache.go 的 v2 键隔离及 backend/internal/repository/ops_repo_token_stats_cache_integration_test.go 的旧均值缓存共存回归；另在 oauth_refresh_api.go 及 oauth_refresh_api_test.go 补齐 DB-only 租约的落库时间预留与 60s/19s 回归（待执行）；上游加权 TPS、NewAdminService 配额依赖/Wire 与 OAuth 轮换保护同时保留。Ultra Fast 文案仅冲突 hunk 等价吸收，没有整个历史定制模块被证明可删除。处理依据、有限验证与待提交步骤检查见[合并记录](上游合并记录-0.2.24-hcai.md)、[部署前审查](部署前审查-0.2.24-hcai.md)和[待发布记录](版本发布记录-0.2.24-hcai.md)。下方各版历史快照完整保留。
+
 ## 0.2.23-hcai(fix1) 新基线（2026-11-19）
 
 上游正式标签解析提交 `5af9afb588c4b014b3df9db7d4073af1f8ae01b6`，合并前远程 dev 为 `fe49e19c58b6a5aa8bead0d966eb3cd2c914e5b0`；本地 HCAI GPT-6.2 修复提交 `2438ff3422d96a6a3c6fe6b87c1a8eae3fbfb59f` 作为合并第一父。11 个旧定制路径与上游更新交叉；完整非文档净差异的可复现命令、交叉路径见[0.2.23 净差异清单](上游净差异清单-0.2.23-hcai(fix1).md)，冲突、语义审查和迁移见[合并记录](上游合并记录-0.2.23-hcai(fix1).md)。下方“本地未提交”描述保留为修复初始阶段的历史状态；当前候选状态以上述记录和[发布记录](版本发布记录-0.2.23-hcai(fix1).md)为准。

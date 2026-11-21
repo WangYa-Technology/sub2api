@@ -25,6 +25,28 @@ upstream_sha="$(git rev-parse "refs/tags/hcai-upstream-$tag^{commit}")"
 version="${tag#v}-hcai"
 branch="chore/sync-upstream-${tag#v}"
 
+if [[ -n "${RESUME_SHA:-}" ]]; then
+  [[ -n "${REQUESTED_TAG:-}" && "$RESUME_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'Resume requires an explicit tag and full candidate SHA' >&2; exit 1; }
+  git fetch origin "refs/heads/$branch:refs/remotes/origin/$branch"
+  [[ "$(git rev-parse "origin/$branch")" == "$RESUME_SHA" ]] || { echo 'Remote candidate SHA changed' >&2; exit 1; }
+  read -r commit first_parent second_parent extra <<<"$(git rev-list --parents -n 1 "$RESUME_SHA")"
+  [[ "$commit" == "$RESUME_SHA" && -n "$first_parent" && "$second_parent" == "$upstream_sha" && -z "${extra:-}" ]] || { echo 'Candidate merge parents changed' >&2; exit 1; }
+  git merge-base --is-ancestor "$first_parent" origin/dev || { echo 'Candidate base is not in dev' >&2; exit 1; }
+  git switch -c "$branch" "origin/$branch"
+  [[ "$(git show "$RESUME_SHA:backend/cmd/server/VERSION")" == "$version" ]] || { echo 'Candidate VERSION mismatch' >&2; exit 1; }
+  for name in "上游合并记录-$version.md" "部署前审查-$version.md" "上游净差异清单-$version.md" "版本发布记录-$version.md"; do
+    [[ -s "docs/hcai-dev/$name" ]] || { echo "Missing candidate record: $name" >&2; exit 1; }
+  done
+  {
+    echo 'run=resume'
+    echo "version=$version"
+    echo "branch=$branch"
+    echo "upstream_sha=$upstream_sha"
+    echo "release_url=$(jq -r .url <<<"$release")"
+  } >> "$GITHUB_OUTPUT"
+  exit 0
+fi
+
 if git merge-base --is-ancestor "$upstream_sha" origin/dev; then
   echo "Already integrated: $tag"
   echo 'run=false' >> "$GITHUB_OUTPUT"

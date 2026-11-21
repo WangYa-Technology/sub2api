@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"fmt"
 	"net/url"
@@ -70,6 +71,33 @@ func cachedTokenStatsFilter() *service.OpsOpenAITokenStatsFilter {
 	end := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
 	return &service.OpsOpenAITokenStatsFilter{TimeRange: "1d", StartTime: end.Add(-24 * time.Hour), EndTime: end, TopN: 20}
 }
+
+func TestTokenStatsPostgresCacheIgnoresLegacyArithmeticMean(t *testing.T) {
+	a, b := tokenStatsIntegrationPools(t)
+	f := cachedTokenStatsFilter()
+	// Reproduce the published v1 key rather than deriving it from the new key.
+	legacyRaw := fmt.Sprintf("admin-global:v1:%s:%s::0:1d:0:0:20",
+		f.StartTime.UTC().Format(time.RFC3339Nano), f.EndTime.UTC().Format(time.RFC3339Nano))
+	legacyKey := fmt.Sprintf("ops:token-stats:v1:%x", sha256.Sum256([]byte(legacyRaw)))
+	_, err := a.Exec(`INSERT INTO ops_token_stats_cache(cache_key,payload,expires_at)
+ VALUES($1,'{"total":999}',clock_timestamp()+interval '120 seconds');`, legacyKey)
+	require.NoError(t, err)
+	_, err = a.Exec(`INSERT INTO usage_fixture VALUES
+ ('test-model','2026-11-01 00:00:00+00',100,9000,10,1,1)`)
+	require.NoError(t, err)
+
+	out, err := (&opsRepository{db: b}).GetOpenAITokenStats(context.Background(), f)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), out.Total, "new nodes must not serve a legacy cached report")
+	require.Len(t, out.Items, 1)
+	require.NotNil(t, out.Items[0].AvgTokensPerSec)
+	require.Equal(t, 20.0, *out.Items[0].AvgTokensPerSec)
+	legacy, err := readTokenStatsCache(context.Background(), a, legacyKey)
+	require.NoError(t, err)
+	require.NotNil(t, legacy, "old nodes retain their own report during rollout or rollback")
+	require.Equal(t, int64(999), legacy.Total)
+}
+
 func TestTokenStatsPostgresCacheCrossInstance(t *testing.T) {
 	a, b := tokenStatsIntegrationPools(t)
 	r1, r2 := &opsRepository{db: a}, &opsRepository{db: b}

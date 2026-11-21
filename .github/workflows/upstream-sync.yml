@@ -9,6 +9,10 @@ on:
         description: Upstream release tag (empty means latest stable release)
         required: false
         type: string
+      resume_sha:
+        description: Existing candidate commit SHA to reopen after a PR creation failure
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -43,6 +47,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REQUESTED_TAG: ${{ inputs.tag }}
+          RESUME_SHA: ${{ inputs.resume_sha }}
         run: bash .github/upstream-sync/prepare.sh
       - name: Resolve conflicts and review HCAI behavior
         if: steps.target.outputs.run == 'true'
@@ -65,13 +70,13 @@ jobs:
           UPSTREAM_SHA: ${{ steps.target.outputs.upstream_sha }}
         run: bash .github/upstream-sync/commit-candidate.sh
       - uses: actions/create-github-app-token@v2
-        if: steps.target.outputs.run == 'true'
+        if: steps.target.outputs.run == 'true' || steps.target.outputs.run == 'resume'
         id: app
         with:
           app-id: ${{ vars.HCAI_AUTOMATION_APP_ID }}
           private-key: ${{ secrets.HCAI_AUTOMATION_APP_PRIVATE_KEY }}
       - name: Push candidate and open PR
-        if: steps.target.outputs.run == 'true'
+        if: steps.target.outputs.run == 'true' || steps.target.outputs.run == 'resume'
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           HCAI_VERSION: ${{ steps.target.outputs.version }}

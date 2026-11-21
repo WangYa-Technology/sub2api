@@ -4,7 +4,9 @@ set -euo pipefail
 merge_head="$(git rev-parse --git-path MERGE_HEAD)"
 [[ -f "$merge_head" ]] || { echo 'Expected pending two-parent merge' >&2; exit 1; }
 [[ "$(cat "$merge_head")" == "$UPSTREAM_SHA" ]] || { echo 'Merge SHA changed' >&2; exit 1; }
+git add -A
 [[ -z "$(git ls-files -u)" ]] || { echo 'Unresolved conflicts' >&2; exit 1; }
+git diff --cached --check
 [[ "$(cat backend/cmd/server/VERSION)" == "$HCAI_VERSION" ]] || { echo 'VERSION mismatch' >&2; exit 1; }
 for name in "上游合并记录-$HCAI_VERSION.md" "部署前审查-$HCAI_VERSION.md" "上游净差异清单-$HCAI_VERSION.md" "版本发布记录-$HCAI_VERSION.md"; do
   [[ -s "docs/hcai-dev/$name" ]] || { echo "Missing $name" >&2; exit 1; }

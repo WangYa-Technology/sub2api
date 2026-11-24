@@ -24,7 +24,7 @@ concurrency:
 jobs:
   candidate:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v6
         with:
@@ -65,11 +65,76 @@ jobs:
           allow-bot-users: wangya-hcai-sub2api-automation
           prompt-file: .github/codex/upstream-merge.md
       - name: Validate and commit merge
+        id: validate_initial
         if: steps.target.outputs.run == 'true'
+        continue-on-error: true
         env:
           HCAI_VERSION: ${{ steps.target.outputs.version }}
           UPSTREAM_SHA: ${{ steps.target.outputs.upstream_sha }}
-        run: bash .github/upstream-sync/commit-candidate.sh
+        run: |
+          set -o pipefail
+          bash .github/upstream-sync/commit-candidate.sh 2>&1 | tee /tmp/hcai-candidate-validation.log
+      - name: Repair candidate validation (attempt 1)
+        if: steps.target.outputs.run == 'true' && steps.validate_initial.outcome == 'failure'
+        uses: openai/codex-action@v1
+        env:
+          HCAI_VERSION: ${{ steps.target.outputs.version }}
+          UPSTREAM_SHA: ${{ steps.target.outputs.upstream_sha }}
+        with:
+          openai-api-key: ${{ secrets.CODEX_PROVIDER_KEY }}
+          responses-api-endpoint: ${{ vars.CODEX_RESPONSES_ENDPOINT }}
+          model: ${{ vars.CODEX_MODEL }}
+          effort: high
+          sandbox: workspace-write
+          allow-bots: true
+          allow-bot-users: wangya-hcai-sub2api-automation
+          prompt-file: .github/codex/candidate-validation-repair.md
+      - name: Revalidate candidate (attempt 1)
+        id: validate_retry_1
+        if: steps.target.outputs.run == 'true' && steps.validate_initial.outcome == 'failure'
+        continue-on-error: true
+        env:
+          HCAI_VERSION: ${{ steps.target.outputs.version }}
+          UPSTREAM_SHA: ${{ steps.target.outputs.upstream_sha }}
+        run: |
+          set -o pipefail
+          bash .github/upstream-sync/commit-candidate.sh 2>&1 | tee /tmp/hcai-candidate-validation.log
+      - name: Repair candidate validation (attempt 2)
+        if: steps.target.outputs.run == 'true' && steps.validate_retry_1.outcome == 'failure'
+        uses: openai/codex-action@v1
+        env:
+          HCAI_VERSION: ${{ steps.target.outputs.version }}
+          UPSTREAM_SHA: ${{ steps.target.outputs.upstream_sha }}
+        with:
+          openai-api-key: ${{ secrets.CODEX_PROVIDER_KEY }}
+          responses-api-endpoint: ${{ vars.CODEX_RESPONSES_ENDPOINT }}
+          model: ${{ vars.CODEX_MODEL }}
+          effort: high
+          sandbox: workspace-write
+          allow-bots: true
+          allow-bot-users: wangya-hcai-sub2api-automation
+          prompt-file: .github/codex/candidate-validation-repair.md
+      - name: Revalidate candidate (attempt 2)
+        id: validate_retry_2
+        if: steps.target.outputs.run == 'true' && steps.validate_retry_1.outcome == 'failure'
+        continue-on-error: true
+        env:
+          HCAI_VERSION: ${{ steps.target.outputs.version }}
+          UPSTREAM_SHA: ${{ steps.target.outputs.upstream_sha }}
+        run: |
+          set -o pipefail
+          bash .github/upstream-sync/commit-candidate.sh 2>&1 | tee /tmp/hcai-candidate-validation.log
+      - name: Require successful candidate validation
+        if: steps.target.outputs.run == 'true'
+        env:
+          INITIAL: ${{ steps.validate_initial.outcome }}
+          RETRY_1: ${{ steps.validate_retry_1.outcome }}
+          RETRY_2: ${{ steps.validate_retry_2.outcome }}
+        run: |
+          [[ "$INITIAL" == success || "$RETRY_1" == success || "$RETRY_2" == success ]] || {
+            echo 'Candidate validation failed after two AI repair attempts' >&2
+            exit 1
+          }
       - uses: actions/create-github-app-token@v2
         if: steps.target.outputs.run == 'true' || steps.target.outputs.run == 'resume'
         id: app

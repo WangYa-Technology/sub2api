@@ -37,6 +37,7 @@ jobs:
           effort: high
           sandbox: workspace-write
           allow-bots: true
+          allow-bot-users: wangya-hcai-sub2api-automation
           prompt-file: .github/codex/dev-to-main.md
       - uses: actions/create-github-app-token@v2
         if: steps.target.outputs.run == 'true'

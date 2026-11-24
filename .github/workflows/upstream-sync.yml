@@ -25,6 +25,13 @@ jobs:
   candidate:
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    outputs:
+      base_sha: ${{ steps.target.outputs.base_sha }}
+      upstream_sha: ${{ steps.target.outputs.upstream_sha }}
+      version: ${{ steps.target.outputs.version }}
+      branch: ${{ steps.target.outputs.branch }}
+      release_url: ${{ steps.target.outputs.release_url }}
+      repairable: ${{ steps.target.outputs.run == 'true' && steps.validate_initial.outcome == 'failure' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -65,23 +72,113 @@ jobs:
           allow-bot-users: wangya-hcai-sub2api-automation
           prompt-file: .github/codex/upstream-merge.md
       - name: Validate and commit merge
+        id: validate_initial
         if: steps.target.outputs.run == 'true'
+        continue-on-error: true
         env:
           HCAI_VERSION: ${{ steps.target.outputs.version }}
           UPSTREAM_SHA: ${{ steps.target.outputs.upstream_sha }}
-        run: bash .github/upstream-sync/commit-candidate.sh
+        run: |
+          set -o pipefail
+          bash .github/upstream-sync/commit-candidate.sh 2>&1 | tee /tmp/hcai-candidate-validation.log
+      - name: Save failed candidate for a fresh repair job
+        if: steps.target.outputs.run == 'true' && steps.validate_initial.outcome == 'failure'
+        run: bash .github/upstream-sync/save-candidate-state.sh
+      - uses: actions/upload-artifact@v4
+        if: steps.target.outputs.run == 'true' && steps.validate_initial.outcome == 'failure'
+        with:
+          name: hcai-candidate-${{ github.run_id }}
+          path: /tmp/hcai-candidate-state/
+          retention-days: 1
+          if-no-files-found: error
+      - name: Require successful candidate validation
+        if: steps.target.outputs.run == 'true'
+        env:
+          INITIAL: ${{ steps.validate_initial.outcome }}
+        run: |
+          [[ "$INITIAL" == success ]] || {
+            echo 'Candidate validation failed; continuing in a separate repair job' >&2
+            exit 1
+          }
       - uses: actions/create-github-app-token@v2
-        if: steps.target.outputs.run == 'true' || steps.target.outputs.run == 'resume'
+        if: steps.target.outputs.run == 'resume' || (steps.target.outputs.run == 'true' && steps.validate_initial.outcome == 'success')
         id: app
         with:
           app-id: ${{ vars.HCAI_AUTOMATION_APP_ID }}
           private-key: ${{ secrets.HCAI_AUTOMATION_APP_PRIVATE_KEY }}
       - name: Push candidate and open PR
-        if: steps.target.outputs.run == 'true' || steps.target.outputs.run == 'resume'
+        if: steps.target.outputs.run == 'resume' || (steps.target.outputs.run == 'true' && steps.validate_initial.outcome == 'success')
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           HCAI_VERSION: ${{ steps.target.outputs.version }}
           UPSTREAM_SHA: ${{ steps.target.outputs.upstream_sha }}
           UPSTREAM_URL: ${{ steps.target.outputs.release_url }}
           CANDIDATE_BRANCH: ${{ steps.target.outputs.branch }}
+        run: bash <(git show "$GITHUB_SHA:.github/upstream-sync/open-candidate.sh")
+
+  repair:
+    needs: candidate
+    if: always() && needs.candidate.outputs.repairable == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.candidate.outputs.base_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache: true
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.10.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.23.4'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - uses: actions/download-artifact@v4
+        with:
+          name: hcai-candidate-${{ github.run_id }}
+          path: /tmp/hcai-candidate-state/
+      - name: Restore the pending two-parent candidate
+        env:
+          BASE_SHA: ${{ needs.candidate.outputs.base_sha }}
+          UPSTREAM_SHA: ${{ needs.candidate.outputs.upstream_sha }}
+          HCAI_VERSION: ${{ needs.candidate.outputs.version }}
+          CANDIDATE_BRANCH: ${{ needs.candidate.outputs.branch }}
+        run: bash .github/upstream-sync/restore-candidate-state.sh
+      - name: Repair failed candidate validation
+        uses: openai/codex-action@v1
+        env:
+          HCAI_VERSION: ${{ needs.candidate.outputs.version }}
+          UPSTREAM_SHA: ${{ needs.candidate.outputs.upstream_sha }}
+        with:
+          openai-api-key: ${{ secrets.CODEX_PROVIDER_KEY }}
+          responses-api-endpoint: ${{ vars.CODEX_RESPONSES_ENDPOINT }}
+          model: ${{ vars.CODEX_MODEL }}
+          effort: high
+          sandbox: workspace-write
+          allow-bots: true
+          allow-bot-users: wangya-hcai-sub2api-automation
+          prompt-file: .github/codex/candidate-validation-repair.md
+      - name: Validate and commit repaired candidate
+        env:
+          HCAI_VERSION: ${{ needs.candidate.outputs.version }}
+          UPSTREAM_SHA: ${{ needs.candidate.outputs.upstream_sha }}
+        run: bash .github/upstream-sync/commit-candidate.sh
+      - uses: actions/create-github-app-token@v2
+        id: app
+        with:
+          app-id: ${{ vars.HCAI_AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.HCAI_AUTOMATION_APP_PRIVATE_KEY }}
+      - name: Push repaired candidate and open PR
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          HCAI_VERSION: ${{ needs.candidate.outputs.version }}
+          UPSTREAM_SHA: ${{ needs.candidate.outputs.upstream_sha }}
+          UPSTREAM_URL: ${{ needs.candidate.outputs.release_url }}
+          CANDIDATE_BRANCH: ${{ needs.candidate.outputs.branch }}
         run: bash <(git show "$GITHUB_SHA:.github/upstream-sync/open-candidate.sh")

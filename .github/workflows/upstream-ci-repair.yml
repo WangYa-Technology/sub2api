@@ -57,6 +57,7 @@ jobs:
           effort: high
           sandbox: workspace-write
           allow-bots: true
+          allow-bot-users: wangya-hcai-sub2api-automation
           prompt-file: .github/codex/ci-repair.md
       - name: Commit repair
         if: steps.target.outputs.run == 'true'

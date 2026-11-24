@@ -62,6 +62,7 @@ if git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
   exit 1
 fi
 git switch -c "$branch" origin/dev
+echo "base_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 git config user.name 'hcai-automation[bot]'
 git config user.email 'hcai-automation[bot]@users.noreply.github.com'
 printf 'HCAI dev=%s main=%s upstream=%s (%s)\n' "$(git rev-parse origin/dev)" "$(git rev-parse origin/main)" "$tag" "$upstream_sha"

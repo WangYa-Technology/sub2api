@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/stretchr/testify/require"
@@ -499,6 +500,8 @@ func TestUpstreamQuotaNewAPISuccessAndUnitLookup(t *testing.T) {
 	account.Credentials[credKeyHeaderOverrideEnabled] = true
 	account.Credentials[credKeyHeaderOverrides] = map[string]any{
 		"x-tenant":      "tenant-a",
+		"x-user":        "{{user_id}}",
+		"x-request":     "{{request_id}}",
 		"authorization": "Bearer attacker-controlled",
 	}
 	account.ProxyID = &proxyID
@@ -538,7 +541,9 @@ func TestUpstreamQuotaNewAPISuccessAndUnitLookup(t *testing.T) {
 	fixedNow := time.Date(2026, time.July, 17, 8, 0, 0, 0, time.UTC)
 	svc.now = func() time.Time { return fixedNow }
 
-	result, err := svc.QueryAccountQuota(context.Background(), account.ID)
+	requestCtx := context.WithValue(context.Background(), ctxkey.RequestID, "quota-admin-request")
+	requestCtx = WithHeaderOverrideRequestScope(requestCtx, 7, 31, nil)
+	result, err := svc.QueryAccountQuota(requestCtx, account.ID)
 	require.NoError(t, err)
 	require.Equal(t, fixedNow, result.ObservedAt)
 	require.Equal(t, "new_api", result.Quota.Provider)
@@ -566,6 +571,8 @@ func TestUpstreamQuotaNewAPISuccessAndUnitLookup(t *testing.T) {
 		require.True(t, HTTPUpstreamRedirectsDisabled(request.Context()))
 		require.Equal(t, HTTPUpstreamProfileOpenAI, HTTPUpstreamProfileFromContext(request.Context()))
 		require.Equal(t, "tenant-a", getHeaderRaw(request.Header, "x-tenant"))
+		require.Empty(t, getHeaderRaw(request.Header, "x-user"), "quota requests must not report the incoming user")
+		require.Empty(t, getHeaderRaw(request.Header, "x-request"), "quota requests must not report an incoming request ID")
 		require.Equal(t, account.Proxy.URL(), proxies[i])
 		require.Nil(t, profiles[i])
 		if request.URL.Path == "/api/status" {

@@ -385,7 +385,7 @@ func (c *upstreamQuotaQueryClient) getLimited(ctx context.Context, endpoint stri
 	reqCtx := WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI)
 	req = req.WithContext(WithHTTPUpstreamRedirectsDisabled(reqCtx))
 	req.Header.Set("Accept", accept)
-	c.account.ApplyHeaderOverrides(req.Header)
+	c.account.ApplyHeaderOverrides(withoutHeaderOverrideRequestScope(req.Context()), req.Header)
 	if authenticated {
 		req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	} else {

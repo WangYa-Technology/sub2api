@@ -15,6 +15,7 @@ import {
   getUpstreamBillingRateHistoryWithEtag,
   getUpstreamBillingRatesWithEtag,
   getUpstreamSiteLogo,
+  previewUpstreamGroup,
   probeUpstreamBilling,
   probeUpstreamBillingBatch,
   queryUpstreamQuota,
@@ -146,5 +147,14 @@ describe('admin account upstream billing probe API', () => {
       params: { days: 30, limit: 500 },
       headers: { 'If-None-Match': '"history-v1"' }
     }))
+  })
+
+  it('maps upstream group text to editable fields and skips empty values', async () => {
+    const source = { account_id: 7 }
+    post.mockResolvedValueOnce({ data: { group_name: '标准组', group_description: '共享账号' } })
+    await expect(previewUpstreamGroup(source)).resolves.toEqual({ name: '标准组', notes: '共享账号' })
+    post.mockResolvedValueOnce({ data: { group_name: '标准组', group_description: '' } })
+    await expect(previewUpstreamGroup(source)).resolves.toEqual({ name: '标准组' })
+    expect(post).toHaveBeenCalledWith('/admin/accounts/upstream-billing-probe/group-preview', source, { signal: undefined })
   })
 })

@@ -229,7 +229,7 @@ func TestLockAndMergeAccountProbeExtraCoalescesNullableOllamaGroupIdentity(t *te
 	loaded, err := newAccountRepositoryWithSQL(tx.Client(), tx, nil).GetByID(ctx, account.ID)
 	require.NoError(t, err)
 
-	merged, baseURLChanged, err := lockAndMergeAccountProbeExtra(ctx, tx.Client(), loaded, nil, nil)
+	merged, baseURLChanged, err := lockAndMergeAccountProbeExtra(ctx, tx.Client(), loaded, service.AccountBillingSettingsUpdate{})
 
 	require.NoError(t, err, "a NULL Ollama eligibility expression must scan as false")
 	require.False(t, baseURLChanged)
@@ -422,7 +422,7 @@ func TestOllamaCloudUsageEligibilityExtendsToCNOpenAICompatPlatforms(t *testing.
 	// lockAndMerge 组身份守卫：CN 行凭证未变时必须保留 ollama 托管键。
 	kimiLoaded, err := repo.GetByID(ctx, kimi.ID)
 	require.NoError(t, err)
-	merged, _, err := lockAndMergeAccountProbeExtra(ctx, tx.Client(), kimiLoaded, nil, nil)
+	merged, _, err := lockAndMergeAccountProbeExtra(ctx, tx.Client(), kimiLoaded, service.AccountBillingSettingsUpdate{})
 	require.NoError(t, err)
 	require.Equal(t, "cipher:cn-shared", merged[service.OllamaCloudUsageSessionExtraKey])
 	require.Equal(t, true, merged[service.OllamaCloudUsageAutoRefreshExtraKey])

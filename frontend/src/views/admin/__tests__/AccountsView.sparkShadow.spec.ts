@@ -341,7 +341,12 @@ describe('admin AccountsView — 账号行展示', () => {
     const tooltip = wrapper.findComponent(HelpTooltip)
     expect(tooltip.props('content')).toBe('https://relay.example.com')
     expect(tooltip.props('widthClass')).toBe('w-max max-w-sm break-all')
-    expect(tooltip.classes()).toEqual(expect.arrayContaining(['self-start']))
+    // 名称与上游分组同步按钮现在共享水平行，由父容器控制对齐。
+    const nameRow = tooltip.element.parentElement
+    expect(Array.from(nameRow?.classList ?? [])).toEqual(expect.arrayContaining(['flex', 'items-center', 'gap-1']))
+    expect(tooltip.element.contains(link.element)).toBe(true)
+    const syncButton = wrapper.get('button[aria-label="admin.accounts.upstreamBilling.saveGroup"]')
+    expect(syncButton.element.parentElement).toBe(nameRow)
     expect(wrapper.text()).toContain('oauth-account')
     expect(wrapper.text()).toContain('invalid-url')
 

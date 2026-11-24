@@ -62,6 +62,7 @@ jobs:
           effort: high
           sandbox: workspace-write
           allow-bots: true
+          allow-bot-users: wangya-hcai-sub2api-automation
           prompt-file: .github/codex/upstream-merge.md
       - name: Validate and commit merge
         if: steps.target.outputs.run == 'true'

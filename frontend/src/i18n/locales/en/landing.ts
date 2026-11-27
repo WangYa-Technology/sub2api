@@ -110,6 +110,8 @@ export default {
       button: 'Sign Up Free'
     },
     footer: {
+      terms: 'Terms of Service',
+      privacy: 'Privacy Policy',
       allRightsReserved: 'All rights reserved.'
     }
   },

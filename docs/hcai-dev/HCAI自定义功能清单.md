@@ -1,5 +1,11 @@
 # HCAI 自定义功能与内容清单
 
+## 2026-11-27 首页页脚更新（基线 `169d306c0`）
+
+品牌静态首页、简版首页及默认回退首页的页脚展示公司全称 HONGKONG HUACHANG NETWORK TECHNOLOGY CO., LIMITED，并提供两个独立入口：用户协议 `https://api.hctopup.com/legal/terms`、隐私政策 `https://api.hctopup.com/legal/privacy`。Vue 首页的链接标签随中英文界面切换。入口直接使用现有法律页面路径，无新增路由、正文或设置。后台自定义首页 HTML 由后台配置维护。
+
+本地首页及语言包定向 Vitest 共 19 项通过；线上正文和部署未核验。
+
 ## 0.2.25-hcai 候选增量（2026-11-24）
 
 固定上游 v0.2.25 `348997267d756eab5729bb6b78a275a15d18796a`，第一父 `dee69dba9c8c25aa55ab3a74ba81f7ad7e08bb70`；当前工作区 pending merge，尚无本轮最终 CI、HCAI Release 或部署证据。保留首页/加载与主题、插件设置存储公开链路、广场渠道展示优先/实际计费分组优先、独立官方价/人民币、CC Switch、菜单凭据隔离、支付返利、异步图片 RequestType=6/MinIO、WeCom、DB 租约和跨节点缓存失效。

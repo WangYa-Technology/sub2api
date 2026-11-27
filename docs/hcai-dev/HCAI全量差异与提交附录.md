@@ -1,5 +1,9 @@
 # HCAI 全量差异和提交附录
 
+## 2026-11-27 首页页脚定制增量（基线 `169d306c0`）
+
+本次源码范围为 `frontend/public/hcai/page.html`、`frontend/src/views/HomeView.vue` 及中英文 `frontend/src/i18n/locales/{en,zh}/landing.ts`。改动为公司版权与现有法律页面链接，历史上游基线与统计保留。行为及验证见 [HCAI 自定义功能清单](HCAI自定义功能清单.md)。
+
 ## 0.2.25-hcai 待提交新基线（2026-11-24）
 
 固定上游 v0.2.25 `348997267d756eab5729bb6b78a275a15d18796a`；HCAI 第一父 / runner origin/dev `dee69dba9c8c25aa55ab3a74ba81f7ad7e08bb70`；共同祖先 v0.2.24 `5c2982a81b46e2142d0143d2f83c1ce9c4da1d24`。保留待提交双亲合并，无本轮最终 CI/正式 Release/部署证据，不改写以下历史快照。

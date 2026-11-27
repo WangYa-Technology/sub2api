@@ -86,7 +86,11 @@
     </main>
 
     <footer class="min-w-0 border-t border-gray-200 px-4 py-5 text-center text-sm text-gray-500 [overflow-wrap:anywhere] sm:px-6 dark:border-dark-800 dark:text-dark-400">
-      &copy; {{ currentYear }} {{ siteName }}
+      <p>&copy; {{ currentYear }} {{ companyName }}. {{ t('home.footer.allRightsReserved') }}</p>
+      <div class="mt-3 flex flex-wrap justify-center gap-x-4 gap-y-2">
+        <a :href="termsUrl" class="hover:underline">{{ t('home.footer.terms') }}</a>
+        <a :href="privacyUrl" class="hover:underline">{{ t('home.footer.privacy') }}</a>
+      </div>
     </footer>
   </div>
 
@@ -498,9 +502,11 @@
         class="mx-auto flex max-w-6xl flex-col items-center justify-center gap-4 text-center sm:flex-row sm:text-left"
       >
         <p class="text-sm text-gray-500 dark:text-dark-400">
-          &copy; {{ currentYear }} {{ siteName }}. {{ t('home.footer.allRightsReserved') }}
+          &copy; {{ currentYear }} {{ companyName }}. {{ t('home.footer.allRightsReserved') }}
         </p>
-        <div class="flex items-center gap-4">
+        <div class="flex flex-wrap items-center justify-center gap-4">
+          <a :href="termsUrl" class="text-sm text-gray-500 hover:underline dark:text-dark-400">{{ t('home.footer.terms') }}</a>
+          <a :href="privacyUrl" class="text-sm text-gray-500 hover:underline dark:text-dark-400">{{ t('home.footer.privacy') }}</a>
           <a
             v-if="docUrl"
             :href="docUrl"
@@ -714,6 +720,10 @@ const userInitial = computed(() => {
   if (!user || !user.email) return ''
   return user.email.charAt(0).toUpperCase()
 })
+
+const companyName = 'HONGKONG HUACHANG NETWORK TECHNOLOGY CO., LIMITED'
+const termsUrl = 'https://api.hctopup.com/legal/terms'
+const privacyUrl = 'https://api.hctopup.com/legal/privacy'
 
 // Current year for footer
 const currentYear = computed(() => new Date().getFullYear())

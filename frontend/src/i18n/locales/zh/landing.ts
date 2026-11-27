@@ -110,6 +110,8 @@ export default {
       button: '免费注册'
     },
     footer: {
+      terms: '用户协议',
+      privacy: '隐私政策',
       allRightsReserved: '保留所有权利。'
     }
   },

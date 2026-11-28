@@ -70,6 +70,8 @@ jobs:
           sandbox: workspace-write
           allow-bots: true
           allow-bot-users: wangya-hcai-sub2api-automation
+          # Scheduled runs can expose the app actor without the [bot] suffix.
+          allow-users: ${{ github.event_name == 'schedule' && 'wangya-hcai-sub2api-automation' || '' }}
           prompt-file: .github/codex/upstream-merge.md
       - name: Validate and commit merge
         id: validate_initial
@@ -165,6 +167,8 @@ jobs:
           sandbox: workspace-write
           allow-bots: true
           allow-bot-users: wangya-hcai-sub2api-automation
+          # Scheduled runs can expose the app actor without the [bot] suffix.
+          allow-users: ${{ github.event_name == 'schedule' && 'wangya-hcai-sub2api-automation' || '' }}
           prompt-file: .github/codex/candidate-validation-repair.md
       - name: Validate and commit repaired candidate
         id: validate_repair
@@ -254,6 +258,8 @@ jobs:
           sandbox: workspace-write
           allow-bots: true
           allow-bot-users: wangya-hcai-sub2api-automation
+          # Scheduled runs can expose the app actor without the [bot] suffix.
+          allow-users: ${{ github.event_name == 'schedule' && 'wangya-hcai-sub2api-automation' || '' }}
           prompt-file: .github/codex/candidate-validation-repair.md
       - name: Validate and commit repaired candidate
         env:

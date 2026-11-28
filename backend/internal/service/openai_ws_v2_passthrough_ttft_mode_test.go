@@ -118,12 +118,19 @@ func openAIWSTTFTModeHTTPExpectedMs(t *testing.T, events []openAIWSTTFTModeTestE
 func TestOpenAIWSPassthroughFirstTokenFollowsTTFTMode(t *testing.T) {
 	for _, mode := range []string{OpenAITTFTModeSemantic, OpenAITTFTModeVisible} {
 		t.Run(mode, func(t *testing.T) {
-			runOpenAIWSPassthroughTTFTModeCase(t, mode)
+			for _, client := range []struct {
+				name  string
+				delay time.Duration
+			}{{"immediate", 0}, {"delayed", 75 * time.Millisecond}} {
+				t.Run(client.name, func(t *testing.T) {
+					runOpenAIWSPassthroughTTFTModeCase(t, mode, client.delay)
+				})
+			}
 		})
 	}
 }
 
-func runOpenAIWSPassthroughTTFTModeCase(t *testing.T, mode string) {
+func runOpenAIWSPassthroughTTFTModeCase(t *testing.T, mode string, clientDelay time.Duration) {
 	gin.SetMode(gin.TestMode)
 	gatewayForwardingCache.Store(&cachedGatewayForwardingSettings{openAITTFTMode: mode, expiresAt: time.Now().Add(time.Minute).UnixNano()})
 	t.Cleanup(func() {
@@ -209,6 +216,9 @@ func runOpenAIWSPassthroughTTFTModeCase(t *testing.T, mode string) {
 
 	request := []byte(`{"type":"response.create","model":"gpt-5.4","input":"hi"}`)
 	for i, turn := range turns {
+		if i > 0 {
+			time.Sleep(clientDelay)
+		}
 		writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
 		require.NoError(t, clientConn.Write(writeCtx, coderws.MessageText, request))
 		cancelWrite()

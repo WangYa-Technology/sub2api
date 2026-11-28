@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, useTemplateRef, nextTick } from 'vue'
+import { getTooltipPosition } from '@/utils/floatingPanel'
 
 const props = withDefaults(defineProps<{
   content?: string
@@ -16,7 +17,9 @@ const props = withDefaults(defineProps<{
 const show = ref(false)
 const triggerRef = useTemplateRef<HTMLElement>('trigger')
 const tooltipRef = useTemplateRef<HTMLElement>('tooltip')
-const placement = ref<'top' | 'bottom'>('top')
+// 上方放不下时翻到图标下方；箭头始终对准图标中心
+const placeBelow = ref(false)
+const arrowLeft = ref('50%')
 const tooltipStyle = ref({ top: '0px', left: '0px', maxHeight: 'none' })
 let openTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -106,24 +109,34 @@ function onViewportChange() {
 
 function updatePosition() {
   const el = triggerRef.value
-  if (!el) return
+  const tip = tooltipRef.value
+  if (!el || !tip) return
   const rect = el.getBoundingClientRect()
-  const tooltipRect = tooltipRef.value?.getBoundingClientRect()
-  const tooltipWidth = tooltipRect?.width ?? 0
-  const tooltipHeight = tooltipRect?.height ?? 0
+  const { width, height } = tip.getBoundingClientRect()
+  const viewportWidth = document.documentElement.clientWidth || window.innerWidth
+  const viewportHeight = window.innerHeight
   const viewportPadding = 8
   const gap = 8
-  const desiredLeft = rect.left + rect.width / 2
-  const minLeft = viewportPadding + tooltipWidth / 2
-  const maxLeft = window.innerWidth - viewportPadding - tooltipWidth / 2
   const spaceAbove = Math.max(0, rect.top - gap - viewportPadding)
-  const spaceBelow = Math.max(0, window.innerHeight - rect.bottom - gap - viewportPadding)
-  const placeAbove = tooltipHeight <= spaceAbove || (tooltipHeight > spaceBelow && spaceAbove >= spaceBelow)
-  placement.value = placeAbove ? 'top' : 'bottom'
+  const spaceBelow = Math.max(0, viewportHeight - rect.bottom - gap - viewportPadding)
+  // Measure the full content even after a previous viewport constrained it.
+  // Bound tall content before positioning so the tooltip can still flip below
+  // a trigger near the top instead of being clamped over the trigger.
+  const contentHeight = Math.max(height, tip.scrollHeight)
+  const placeAbove = contentHeight <= spaceAbove || (contentHeight > spaceBelow && spaceAbove >= spaceBelow)
+  const maxHeight = placeAbove ? spaceAbove : spaceBelow
+  const { left, top } = getTooltipPosition(
+    rect,
+    { width, height: Math.min(contentHeight, maxHeight) },
+    viewportWidth,
+    viewportHeight
+  )
+  placeBelow.value = top >= rect.bottom
+  arrowLeft.value = `${Math.min(Math.max(rect.left + rect.width / 2 - left, 8), Math.max(8, width - 8))}px`
   tooltipStyle.value = {
-    top: `${placeAbove ? rect.top - gap : rect.bottom + gap}px`,
-    left: `${Math.min(Math.max(desiredLeft, minLeft), Math.max(minLeft, maxLeft))}px`,
-    maxHeight: `${placeAbove ? spaceAbove : spaceBelow}px`,
+    top: `${top}px`,
+    left: `${left}px`,
+    maxHeight: `${maxHeight}px`,
   }
 }
 
@@ -172,15 +185,14 @@ onBeforeUnmount(() => {
 
     <!-- Teleport to body to escape modal overflow clipping -->
     <Teleport to="body">
-      <!-- before: 伪元素向下延伸一段透明区域，盖住提示框与触发图标之间的空隙，让指针能连续移入提示框。 -->
+      <!-- before: 伪元素朝触发图标延伸一段透明区域，盖住提示框与图标之间的空隙，让指针能连续移入提示框。 -->
       <div
         ref="tooltip"
         v-show="show"
         role="tooltip"
         :class="[
-          'fixed z-[99999] -translate-x-1/2 overflow-y-auto rounded-lg bg-gray-900 p-3 text-xs leading-relaxed text-white shadow-xl ring-1 ring-white/10 selection:bg-primary-200 selection:text-gray-900 before:absolute before:inset-x-0 before:h-3 dark:bg-gray-800 dark:selection:bg-primary-200 dark:selection:text-gray-900',
-          placement === 'top' ? '-translate-y-full' : '',
-          placement === 'top' ? 'before:top-full' : 'before:bottom-full',
+          'fixed z-[99999] overflow-y-auto rounded-lg bg-gray-900 p-3 text-xs leading-relaxed text-white shadow-xl ring-1 ring-white/10 selection:bg-primary-200 selection:text-gray-900 before:absolute before:inset-x-0 before:h-3 dark:bg-gray-800 dark:selection:bg-primary-200 dark:selection:text-gray-900',
+          placeBelow ? 'before:bottom-full' : 'before:top-full',
           props.widthClass,
           props.tooltipClass,
         ]"
@@ -200,8 +212,8 @@ onBeforeUnmount(() => {
         </button>
         <slot>{{ content }}</slot>
         <div
-          class="absolute left-1/2 h-2 w-2 -translate-x-1/2 rotate-45 bg-gray-900 dark:bg-gray-800"
-          :class="placement === 'top' ? '-bottom-1' : '-top-1'"
+          :class="['absolute h-2 w-2 -translate-x-1/2 rotate-45 bg-gray-900 dark:bg-gray-800', placeBelow ? '-top-1' : '-bottom-1']"
+          :style="{ left: arrowLeft }"
         ></div>
       </div>
     </Teleport>

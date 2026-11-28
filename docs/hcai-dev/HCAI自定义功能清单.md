@@ -531,3 +531,9 @@ API 在 `/api/v1/admin/accounts` 下：`/upstream-billing-rates`、`/upstream-bi
 以`.20→fix1`及`.21→fix1`两种基线形成[功能变更与影响审查](功能变更与影响审查-0.2.21-hcai(fix1)-2026-11-14.md)。HCAI首页、渠道展示价优先与币种分列、菜单过滤、返利计算等保留；累计上游更新仍改变缓存TTL实际计费、认证刷新、模型重试冷却、支付配置精度和请求体内存预算，不以“自定义保留”推导全系统行为完全不变。
 
 新增确认的既有限制：TLS模板service缓存跨节点同步后，旧HTTP客户端/Transport仍可能用于后续请求并持有旧profile；无网络overlay探针已复现，尚未修复。此前“在途连接不强制更新”的边界应扩展到复用旧Transport的新请求，不宣称TLS实际握手热更新全部完成。IP信任开关/头列表跨节点更新，以及读库失败时禁用兼容信任，可能改变安全客户端IP并使已启用绑定的会话要求重新登录；详细条件和证据见新记录。
+
+## 2026-11-28：0.2.26-hcai 上游合并增量
+
+固定上游 Release `v0.2.26`（`9494105c7e350937a61bd78b3f913a5a10867f58`）合入准备目标版本 `0.2.26-hcai`。上游增加 Anthropic URL image safety、Responses/Chat bridge 工具与终止事件兼容、Antigravity quota 切换、OpenAI WS TTFT/compact 流修复、Grok 免费额度刷新、代理账户计数、usage/help tooltip 视口定位、OAuth/账户用量回归和相关依赖更新。HCAI 合并保留首页/品牌/loading/主题、插件设置持久化、模型广场渠道展示价优先与实际扣费分离、菜单/外链凭据隔离、支付/兑换返利、图片 MinIO/异步用量、企业微信、节点指标、数据库锁/租约/缓存失效广播、双语 locale 以及统一 CI/amd64 发行保护。
+
+本轮逐 hunk 处理 8 个文本冲突；HelpTooltip 同时保留 HCAI 延迟 hover、键盘 focus、maxHeight 和 tooltipClass 与上游 viewport clamp/滚动重算/箭头对齐，AccountsView 同时保留倍率刷新和代理计数竞态保护。Grok/WS/内容审核测试两侧断言均保留。当前只完成静态冲突清理和版本解析，Go/前端运行时测试、数据库/多节点/MinIO/支付/浏览器验收尚未完成；不得将源码存在写成线上验收。详见[上游合并记录-0.2.26-hcai](上游合并记录-0.2.26-hcai.md)、[部署前审查-0.2.26-hcai](部署前审查-0.2.26-hcai.md)和[净差异清单-0.2.26-hcai](上游净差异清单-0.2.26-hcai.md)。

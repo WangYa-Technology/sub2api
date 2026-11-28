@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { enableAutoUnmount, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
+
+enableAutoUnmount(afterEach)
 
 function getTooltipElement(): HTMLDivElement {
   const tooltip = document.body.querySelector('[role="tooltip"]')
@@ -15,6 +17,7 @@ describe('HelpTooltip', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
     document.body.innerHTML = ''
   })
 
@@ -23,7 +26,6 @@ describe('HelpTooltip', () => {
       attachTo: document.body,
       props: {
         content: 'hover details',
-        tooltipClass: '!py-2',
       },
     })
 
@@ -31,7 +33,6 @@ describe('HelpTooltip', () => {
     const tooltip = getTooltipElement()
 
     expect(tooltip.style.display).toBe('none')
-    expect(tooltip.classList.contains('!py-2')).toBe(true)
 
     await trigger.trigger('mouseenter')
     await nextTick()
@@ -40,37 +41,27 @@ describe('HelpTooltip', () => {
     await trigger.trigger('mouseleave')
     await nextTick()
     expect(tooltip.style.display).toBe('none')
-
-    wrapper.unmount()
   })
 
   it('supports a delayed hover without delaying keyboard focus', async () => {
     vi.useFakeTimers()
     const wrapper = mount(HelpTooltip, {
       attachTo: document.body,
-      props: {
-        content: 'delayed details',
-        openDelayMs: 500,
-      },
+      props: { content: 'delayed details', openDelayMs: 500 },
       slots: { trigger: '<button type="button">balance</button>' },
     })
-
     const trigger = wrapper.get('.group')
     const tooltip = getTooltipElement()
-
     await trigger.trigger('mouseenter')
     await vi.advanceTimersByTimeAsync(499)
     expect(tooltip.style.display).toBe('none')
-
     await vi.advanceTimersByTimeAsync(1)
     await nextTick()
     expect(tooltip.style.display).not.toBe('none')
-
     await trigger.trigger('mouseleave')
     await trigger.trigger('focusin')
     await nextTick()
     expect(tooltip.style.display).not.toBe('none')
-
     wrapper.unmount()
   })
 
@@ -100,8 +91,6 @@ describe('HelpTooltip', () => {
     tooltip.dispatchEvent(new MouseEvent('mouseleave', { relatedTarget: null }))
     await nextTick()
     expect(tooltip.style.display).toBe('none')
-
-    wrapper.unmount()
   })
 
   it('supports click-to-toggle details and closes on outside click', async () => {
@@ -138,89 +127,126 @@ describe('HelpTooltip', () => {
     document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await nextTick()
     expect(tooltip.style.display).toBe('none')
-
-    wrapper.unmount()
   })
 
-  it('opens on keyboard focus and clamps fixed positioning to the viewport', async () => {
-    const originalInnerWidth = window.innerWidth
-    const originalInnerHeight = window.innerHeight
-    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 })
-    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 320 })
+  it('keeps a focused tooltip clamped with a bounded height', async () => {
+    vi.stubGlobal('innerWidth', 390)
+    vi.stubGlobal('innerHeight', 320)
     const wrapper = mount(HelpTooltip, {
       attachTo: document.body,
-      props: { content: 'quota details' },
+      props: { content: 'quota details', tooltipClass: '!py-2' },
       slots: { trigger: '<button type="button">quota</button>' },
     })
-
     const trigger = wrapper.get('.group')
     const tooltip = getTooltipElement()
     const triggerRect = vi.spyOn(trigger.element, 'getBoundingClientRect').mockReturnValue({
-      x: 360,
-      y: 120,
-      top: 120,
-      right: 380,
-      bottom: 144,
-      left: 360,
-      width: 20,
-      height: 24,
-      toJSON: () => ({}),
+      x: 360, y: 120, top: 120, right: 380, bottom: 144, left: 360, width: 20, height: 24, toJSON: () => ({}),
     })
     const tooltipRect = vi.spyOn(tooltip, 'getBoundingClientRect').mockReturnValue({
-      x: 0,
-      y: 0,
-      top: 0,
-      right: 300,
-      bottom: 100,
-      left: 0,
-      width: 300,
-      height: 100,
-      toJSON: () => ({}),
+      x: 0, y: 0, top: 0, right: 300, bottom: 100, left: 0, width: 300, height: 100, toJSON: () => ({}),
     })
-
     await trigger.trigger('focusin')
     await nextTick()
     await nextTick()
     expect(tooltip.style.display).not.toBe('none')
-    expect(tooltip.style.left).toBe('232px')
-    expect(tooltip.style.top).toBe('112px')
+    expect(tooltip.style.left).toBe('82px')
+    expect(tooltip.style.top).toBe('12px')
     expect(tooltip.style.maxHeight).toBe('104px')
-    expect(tooltip.classList.contains('-translate-y-full')).toBe(true)
+    expect(tooltip.classList.contains('!py-2')).toBe(true)
+    expect(tooltip.classList.contains('before:top-full')).toBe(true)
+    expect((tooltip.lastElementChild as HTMLElement).style.left).toBe('288px')
 
-    triggerRect.mockReturnValue({
-      x: 360,
-      y: 8,
-      top: 8,
-      right: 380,
-      bottom: 32,
-      left: 360,
-      width: 20,
-      height: 24,
-      toJSON: () => ({}),
-    })
-    tooltipRect.mockReturnValue({
-      x: 0,
-      y: 0,
-      top: 0,
-      right: 300,
-      bottom: 500,
-      left: 0,
-      width: 300,
-      height: 500,
-      toJSON: () => ({}),
-    })
+    triggerRect.mockReturnValue(new DOMRect(360, 8, 20, 24))
+    tooltipRect.mockReturnValue(new DOMRect(0, 0, 300, 500))
     window.dispatchEvent(new Event('resize'))
     await nextTick()
     expect(tooltip.style.top).toBe('40px')
     expect(tooltip.style.maxHeight).toBe('272px')
-    expect(tooltip.classList.contains('-translate-y-full')).toBe(false)
-
+    expect(tooltip.classList.contains('before:bottom-full')).toBe(true)
     await trigger.trigger('focusout')
     await nextTick()
     expect(tooltip.style.display).toBe('none')
-
     wrapper.unmount()
-    Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalInnerWidth })
-    Object.defineProperty(window, 'innerHeight', { configurable: true, value: originalInnerHeight })
   })
+
+  it.each([
+    { scrollX: 120, scrollY: 0 },
+    { scrollX: 0, scrollY: 240 },
+    { scrollX: 120, scrollY: 240 },
+  ])('uses viewport coordinates when opening with scroll ($scrollX, $scrollY)', async ({ scrollX, scrollY }) => {
+    vi.stubGlobal('scrollX', scrollX)
+    vi.stubGlobal('scrollY', scrollY)
+    const wrapper = mount(HelpTooltip, {
+      attachTo: document.body,
+      props: { content: 'positioned details' },
+    })
+    const trigger = wrapper.get('.group')
+    vi.spyOn(trigger.element, 'getBoundingClientRect').mockReturnValue(new DOMRect(80, 160, 24, 24))
+
+    await trigger.trigger('mouseenter')
+    await nextTick()
+
+    const tooltip = getTooltipElement()
+    expect(tooltip.style.display).not.toBe('none')
+    expect(tooltip.classList.contains('fixed')).toBe(true)
+    expect(tooltip.style.left).toBe('92px')
+    expect(tooltip.style.top).toBe('152px')
+  })
+
+  it('keeps the tooltip inside a narrow mobile viewport', async () => {
+    vi.stubGlobal('innerWidth', 375)
+    const wrapper = mount(HelpTooltip, {
+      attachTo: document.body,
+      props: { content: 'edge details' },
+    })
+    const trigger = wrapper.get('.group')
+    const tooltip = getTooltipElement()
+    // 图标贴在视口左侧、靠近顶部：居中会向左溢出，上方也放不下
+    vi.spyOn(trigger.element, 'getBoundingClientRect').mockReturnValue(new DOMRect(20, 40, 16, 16))
+    vi.spyOn(tooltip, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 256, 80))
+
+    await trigger.trigger('mouseenter')
+    await nextTick()
+
+    expect(tooltip.style.left).toBe('8px')
+    expect(tooltip.style.top).toBe('64px')
+  })
+
+  it.each(['window scroll', 'nested scroll', 'resize'] as const)(
+    'recalculates viewport coordinates for an open tooltip on %s',
+    async (change) => {
+      const container = document.createElement('div')
+      document.body.appendChild(container)
+      const wrapper = mount(HelpTooltip, {
+        attachTo: container,
+        props: { content: 'moving details', trigger: 'click' },
+      })
+      const trigger = wrapper.get('.group')
+      const getBoundingClientRect = vi.spyOn(trigger.element, 'getBoundingClientRect')
+        .mockReturnValue(new DOMRect(80, 160, 24, 24))
+
+      await trigger.trigger('click')
+      await nextTick()
+
+      const tooltip = getTooltipElement()
+      expect(tooltip.style.left).toBe('92px')
+      expect(tooltip.style.top).toBe('152px')
+
+      vi.stubGlobal('scrollX', 120)
+      vi.stubGlobal('scrollY', 240)
+      getBoundingClientRect.mockReturnValue(new DOMRect(40, 100, 32, 24))
+
+      if (change === 'nested scroll') {
+        container.dispatchEvent(new Event('scroll', { bubbles: false }))
+      } else {
+        window.dispatchEvent(new Event(change === 'resize' ? 'resize' : 'scroll'))
+      }
+      await nextTick()
+
+      expect(tooltip.style.display).not.toBe('none')
+      expect(getBoundingClientRect).toHaveBeenCalledTimes(2)
+      expect(tooltip.style.left).toBe('56px')
+      expect(tooltip.style.top).toBe('92px')
+    },
+  )
 })

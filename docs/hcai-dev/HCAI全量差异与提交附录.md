@@ -566,3 +566,13 @@ d3c656fb8 hcai: prevent grouped sidebar items from rendering as standalone links
 ## 2026-11-14 正式发布状态追加
 
 本次系统设置及四类运行时缓存修复已包含于 [v0.2.21-hcai(fix1)](https://github.com/WangYa-Technology/sub2api/releases/tag/v0.2.21-hcai%28fix1%29)，发行源码 `2db175f8d4b79115e1010b1610391da025a9fdaa`。最终dev/main代码PR的Backend/Frontend及自动构建全部成功，归档、二进制、SHA256和工具链已核验；详见[修订发布记录](版本发布记录-0.2.21-hcai(fix1).md)。上文“本地待审核/未发布”为此前阶段的历史状态，不改写历史结论。本次未部署，不宣称生产验收完成或全部缓存即时强一致。
+
+## 2026-11-28：0.2.26-hcai 新基线增量（pending）
+
+本节新增记录，不改写历史全量快照。第一父为 `caa1a574ca1d328c966815d7100526936c56c28a`，固定上游 Release SHA 为 `9494105c7e350937a61bd78b3f913a5a10867f58`，目标版本为 `0.2.26-hcai`。该上游范围共有 689 个变更路径；按当前工作区与上游 blob 比较，非 docs HCAI 净差异为 452 个路径，其中 40 个与上游增量交叉；8 个文件发生文本冲突，已逐 hunk 合并。完整路径可由[净差异清单](上游净差异清单-0.2.26-hcai.md)中的两个 `git diff --name-status` 命令重现。
+
+受影响的完整范围包括 backend Go 源码/测试、`backend/go.mod` 与 `go.sum`、前端 Vue/locale/测试、`frontend/pnpm-lock.yaml`、图片/内容审核、账户额度与代理计数、缓存/租约/节点运维、支付/兑换返利和上游协议桥接。相对上游，HCAI 专属首页资源、统一 CI/amd64 Release workflow、README 品牌入口、多节点自定义实现和下列完整迁移文件名继续保留：`154_add_redeem_code_sale_price.sql`、`155_affiliate_ledger_source_ref.sql`、`182_account_upstream_billing_rate_history.sql`、`183_upstream_site_logo_cache.sql`、`191_allow_async_usage_request_type.sql`、`192_ops_wecom_alert_notification.sql`、`194_ops_node_metrics.sql`、`195_auth_cache_invalidation_broadcast.sql`、`196_ops_system_metrics_source_node.sql`、`197_oauth_refresh_leases.sql`、`221_content_moderation_node_metrics.sql`、`249_ops_token_stats_cache.sql`。没有新增或改写已发布迁移。
+
+完整 452 路径清单已按当前工作区 blob 生成并保存在[0.2.26 净差异清单](上游净差异清单-0.2.26-hcai.md#当前工作区相对固定上游的完整非-docs-路径452)；该生成清单与本节历史快照分离。
+
+本版本增量差异和被上游吸收/保留的行为见[上游合并记录-0.2.26-hcai](上游合并记录-0.2.26-hcai.md)。静态冲突检查和版本解析已完成；运行时测试、完整构建、隔离环境验收、远程 CI、CODEOWNER、Release 和部署均未完成，不能把本节作为发布成功证据。

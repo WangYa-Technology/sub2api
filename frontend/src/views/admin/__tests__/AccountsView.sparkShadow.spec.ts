@@ -45,7 +45,7 @@ vi.mock('@/api/admin', () => ({
       batchRefresh: vi.fn(),
       toggleSchedulable: vi.fn()
     },
-    proxies: { getAll: getAllProxies },
+    proxies: { getAllWithCount: getAllProxies },
     groups: { getAll: getAllGroups }
   }
 }))
@@ -347,6 +347,7 @@ describe('admin AccountsView — 账号行展示', () => {
     expect(tooltip.element.contains(link.element)).toBe(true)
     const syncButton = wrapper.get('button[aria-label="admin.accounts.upstreamBilling.saveGroup"]')
     expect(syncButton.element.parentElement).toBe(nameRow)
+    expect(tooltip.classes()).toEqual(expect.arrayContaining(['inline-flex', 'items-center', 'align-middle', '-ml-1']))
     expect(wrapper.text()).toContain('oauth-account')
     expect(wrapper.text()).toContain('invalid-url')
 

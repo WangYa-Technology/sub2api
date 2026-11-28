@@ -117,6 +117,15 @@ func TestContentModerationUserViolationTransactionSerializesAutoBan(t *testing.T
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestBuildContentModerationLogWhere_ErrorExcludesImageSafetyEvidence(t *testing.T) {
+	where, args := buildContentModerationLogWhere(service.ContentModerationLogFilter{Result: "error"})
+
+	require.Empty(t, args)
+	sql := strings.Join(where, " AND ")
+	require.Contains(t, sql, "l.error <> ''")
+	require.Contains(t, sql, "l.action <> '"+service.ContentModerationActionImageSafety+"'")
+}
+
 func TestContentModerationRepositoryCountFlaggedByUserSince_ExcludesHashBlock(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
